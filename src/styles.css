@@ -1,0 +1,12 @@
+:root { font-family: system-ui, sans-serif; color: #102418; }
+body { margin: 0; background: #f4f7f2; }
+.shell { max-width: 900px; margin: 0 auto; padding: 1rem; }
+header h1 { margin: 0 0 .5rem; }
+nav { display:flex; flex-wrap:wrap; gap:.4rem; }
+button { padding:.5rem .7rem; border-radius:.6rem; border:1px solid #567; background:#fff; }
+section { background: #fff; border-radius: 12px; padding: 1rem; margin-top: .8rem; }
+label, fieldset { display:block; margin:.6rem 0; }
+input, textarea, select { width:100%; padding:.45rem; margin-top:.2rem; }
+.photos { display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:.5rem; }
+.photos img { width:100%; height:100px; object-fit:cover; border-radius:.5rem; }
+.warning { background:#fff3cd; color:#6b4e00; padding:.6rem; border-radius:.5rem; border:1px solid #e8cf6d; }
