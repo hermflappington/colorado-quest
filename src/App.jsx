@@ -24,6 +24,33 @@ const CATEGORIES = [
 const CONFIDENCE = ['Low', 'Medium', 'High', 'Needs expert review'];
 const STATUS = ['New', 'Reviewed', 'Needs follow-up', 'Archived'];
 const LAND_ACCESS = ['public land', 'private land', 'unknown', 'permitted area', 'trail/roadside'];
+const BADGES = [
+  {
+    name: 'Moffat County Scout',
+    description: 'Log your first Colorado Quest discovery.',
+    earned: (stats) => stats.entryCount >= 1,
+  },
+  {
+    name: 'Browns Park Tracker',
+    description: 'Log a discovery with Browns Park in the location name.',
+    earned: (stats) => stats.locationText.includes('browns park'),
+  },
+  {
+    name: 'Dinosaur Country Naturalist',
+    description: 'Log a discovery with Dinosaur in the location name.',
+    earned: (stats) => stats.locationText.includes('dinosaur'),
+  },
+  {
+    name: 'Yampa River Explorer',
+    description: 'Log a discovery with Yampa in the location name.',
+    earned: (stats) => stats.locationText.includes('yampa'),
+  },
+  {
+    name: 'Northwest Colorado Pathfinder',
+    description: 'Log five discoveries and three gratitude notes.',
+    earned: (stats) => stats.entryCount >= 5 && stats.gratitudeCount >= 3,
+  },
+];
 
 const icon = new L.Icon({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
@@ -37,7 +64,7 @@ const blank = { profiles: [starterAdult], activeProfileId: starterAdult.id, entr
 
 const initialForm = {
   title: '', notes: '', category: CATEGORIES[0], profileIds: [], photos: [], lat: '', lng: '',
-  confidence: CONFIDENCE[0], status: STATUS[0], generalLocationName: '', landAccess: LAND_ACCESS[2],
+  confidence: CONFIDENCE[0], status: STATUS[0], generalLocationName: '', landAccess: LAND_ACCESS[2], gratitude: '',
 };
 
 function load() {
@@ -59,6 +86,25 @@ function autoTitle(category, notes, generalLocationName) {
 
 function formatGps(lat, lng) {
   return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+}
+
+function entryPoints(entry) {
+  let points = 10;
+  points += (entry.photos?.length || 0) * 5;
+  if (entry.gratitude?.trim()) points += 5;
+  if (SENSITIVE.has(entry.category)) points += 10;
+  return points;
+}
+
+function gameStats(entries) {
+  const locationText = entries.map((entry) => entry.generalLocationName || '').join(' ').toLowerCase();
+  const totalPoints = entries.reduce((sum, entry) => sum + entryPoints(entry), 0);
+  const gratitudeCount = entries.filter((entry) => entry.gratitude?.trim()).length;
+  const stats = { entryCount: entries.length, gratitudeCount, locationText, totalPoints };
+  return {
+    ...stats,
+    badges: BADGES.map((badge) => ({ ...badge, isEarned: badge.earned(stats) })),
+  };
 }
 
 
@@ -102,6 +148,7 @@ export default function App() {
   useEffect(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(db)), [db]);
 
   const sortedEntries = useMemo(() => [...db.entries].sort((a, b) => b.createdAt - a.createdAt), [db.entries]);
+  const stats = useMemo(() => gameStats(db.entries), [db.entries]);
   const activeProfile = db.profiles.find((p) => p.id === db.activeProfileId);
 
   const addProfile = (name, role) => setDb((d) => ({ ...d, profiles: [...d.profiles, { id: crypto.randomUUID(), name, role }] }));
@@ -156,7 +203,15 @@ export default function App() {
       <nav>{['Home', 'New Discovery', 'Journal', 'Map', 'Profiles', 'Settings'].map((s) => <button key={s} onClick={() => setScreen(s)}>{s}</button>)}</nav>
     </header>
 
-    {screen === 'Home' && <section><h2>Field Journal MVP</h2><p>Local-only family journal for discoveries.</p><p>{db.entries.length} discoveries logged</p></section>}
+    {screen === 'Home' && <section><h2>Colorado Quest Progress</h2>
+      <div className="stats">
+        <div><strong>{stats.entryCount}</strong><span>discoveries</span></div>
+        <div><strong>{stats.totalPoints}</strong><span>quest points</span></div>
+        <div><strong>{stats.badges.filter((badge) => badge.isEarned).length}</strong><span>badges earned</span></div>
+      </div>
+      <h3>Local badges</h3>
+      <div className="badges">{stats.badges.map((badge) => <div className={`badge ${badge.isEarned ? 'earned' : ''}`} key={badge.name}><strong>{badge.name}</strong><span>{badge.isEarned ? 'Earned' : badge.description}</span></div>)}</div>
+    </section>}
 
     {screen === 'Profiles' && <section><h2>Profiles</h2><ProfileForm addProfile={addProfile} /><ul>{db.profiles.map((p) => <li key={p.id}>{p.name} — {p.role}</li>)}</ul></section>}
 
@@ -165,6 +220,7 @@ export default function App() {
       {SENSITIVE.has(form.category) && <p className="warning">Do not disturb, collect, touch, dig, or publicize this location. Exact GPS will stay private.</p>}
       <label>Title (optional)<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
       <label>Notes (optional)<textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
+      <label>What are you thankful for here? (optional)<textarea value={form.gratitude} onChange={(e) => setForm({ ...form, gratitude: e.target.value })} /></label>
       <label>General location name<input value={form.generalLocationName} onChange={(e) => setForm({ ...form, generalLocationName: e.target.value })} /></label>
       <label>Confidence<select value={form.confidence} onChange={(e) => setForm({ ...form, confidence: e.target.value })}>{CONFIDENCE.map((c) => <option key={c}>{c}</option>)}</select></label>
       <label>Status<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>{STATUS.map((s) => <option key={s}>{s}</option>)}</select></label>
@@ -174,12 +230,13 @@ export default function App() {
       <div className="photos">{form.photos.map((p, i) => <img key={i} src={p} alt="discovery" />)}</div>
       <button onClick={captureGps}>Capture GPS</button>
       <p>{form.lat && form.lng ? formatGps(Number(form.lat), Number(form.lng)) : 'No GPS yet (required)'}</p>
+      <p className="points-preview">This discovery can earn {entryPoints(form)} quest points.</p>
       <button disabled={!canSave} onClick={createEntry}>Save Discovery</button>
     </section>}
 
-    {screen === 'Journal' && <section><h2>Journal</h2>{sortedEntries.map((e) => <article key={e.id}><button onClick={() => { setSelected(e); setScreen('Entry Detail'); }}>{new Date(e.createdAt).toLocaleString()} — {e.title}</button></article>)}</section>}
+    {screen === 'Journal' && <section><h2>Journal</h2>{sortedEntries.map((e) => <article key={e.id}><button onClick={() => { setSelected(e); setScreen('Entry Detail'); }}>{new Date(e.createdAt).toLocaleString()} - {e.title} ({entryPoints(e)} pts)</button></article>)}</section>}
 
-    {screen === 'Entry Detail' && selected && <section><h2>{selected.title}</h2><p>{selected.category}</p><p>General location: {selected.generalLocationName || 'Not set'}</p><p>Confidence: {selected.confidence}</p><p>Status: {selected.status}</p><p>Land access: {selected.landAccess}</p><p>{selected.notes || 'No notes.'}</p><p>Credits: {selected.profileIds.map((id) => db.profiles.find((p) => p.id === id)?.name).filter(Boolean).join(', ') || 'None'}</p><div className="photos">{selected.photos.map((p, i) => <img key={i} src={p} alt="entry" />)}</div>
+    {screen === 'Entry Detail' && selected && <section><h2>{selected.title}</h2><p>{selected.category}</p><p>Quest points: {entryPoints(selected)}</p><p>General location: {selected.generalLocationName || 'Not set'}</p><p>Confidence: {selected.confidence}</p><p>Status: {selected.status}</p><p>Land access: {selected.landAccess}</p><p>{selected.notes || 'No notes.'}</p><p>Gratitude: {selected.gratitude || 'Not added yet.'}</p><p>Credits: {selected.profileIds.map((id) => db.profiles.find((p) => p.id === id)?.name).filter(Boolean).join(', ') || 'None'}</p><div className="photos">{selected.photos.map((p, i) => <img key={i} src={p} alt="entry" />)}</div>
       {SENSITIVE.has(selected.category) && !revealed[selected.id] ? <div><p>Exact GPS hidden (sensitive category).</p>{canRevealSensitive ? <button onMouseDown={() => beginRevealHold(selected.id)} onMouseUp={cancelRevealHold} onMouseLeave={cancelRevealHold} onTouchStart={() => beginRevealHold(selected.id)} onTouchEnd={cancelRevealHold} onTouchCancel={cancelRevealHold}>Hold 2s to reveal (adult only)</button> : <p>Active profile is kid; only approximate location is visible.</p>}</div> : <p>GPS: {formatGps(selected.lat, selected.lng)}</p>}
       <div className="actions">
         <button onClick={() => { setDb((d) => ({ ...d, entries: d.entries.filter((x) => x.id !== selected.id) })); setScreen('Journal'); setSelected(null); }}>Delete Entry</button>
