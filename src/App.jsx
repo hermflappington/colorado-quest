@@ -24,6 +24,27 @@ const CATEGORIES = [
 const CONFIDENCE = ['Low', 'Medium', 'High', 'Needs expert review'];
 const STATUS = ['New', 'Reviewed', 'Needs follow-up', 'Archived'];
 const LAND_ACCESS = ['public land', 'private land', 'unknown', 'permitted area', 'trail/roadside'];
+const LEVELS = [
+  { name: 'Trail Starter', points: 0 },
+  { name: 'Moffat County Scout', points: 100 },
+  { name: 'Browns Park Tracker', points: 250 },
+  { name: 'Yampa River Explorer', points: 500 },
+  { name: 'Dinosaur Country Naturalist', points: 750 },
+  { name: 'Northwest Colorado Pathfinder', points: 1000 },
+  { name: 'Mountain Memory Keeper', points: 1500 },
+];
+const PLACE_TALKS = [
+  'Who else may have stood near here long before us?',
+  'What has this mountain seen that we will never know?',
+  'What still looks the same as it might have 1,000 years ago?',
+  'What changed here in the last 100 years?',
+  'How can we be good guests in this place today?',
+  'What would this place teach us if we were quiet for one minute?',
+  'What signs of water, wind, fire, or time do you see?',
+  'What do you want to remember about standing here?',
+  'What might a kid standing here 1,000 years from now notice?',
+  'What are we borrowing from this place, and how do we give respect back?',
+];
 const BADGES = [
   {
     group: 'Northwest Colorado',
@@ -251,10 +272,23 @@ function entryPoints(entry) {
   return points;
 }
 
+function badgePoints(badge) {
+  if (badge.name === 'Northwest Colorado Pathfinder' || badge.name === 'Kind Explorer') return 100;
+  if (badge.group === 'Northwest Colorado') return 50;
+  if (badge.group === 'Colorado') return 40;
+  return 25;
+}
+
+function currentLevel(totalPoints) {
+  const level = [...LEVELS].reverse().find((item) => totalPoints >= item.points) || LEVELS[0];
+  const next = LEVELS.find((item) => item.points > totalPoints);
+  return { ...level, next };
+}
+
 function gameStats(entries) {
   const locationText = entries.map((entry) => entry.generalLocationName || '').join(' ').toLowerCase();
   const allText = entries.map((entry) => [entry.title, entry.notes, entry.gratitude, entry.generalLocationName].filter(Boolean).join(' ')).join(' ').toLowerCase();
-  const totalPoints = entries.reduce((sum, entry) => sum + entryPoints(entry), 0);
+  const basePoints = entries.reduce((sum, entry) => sum + entryPoints(entry), 0);
   const photoCount = entries.reduce((sum, entry) => sum + (entry.photos?.length || 0), 0);
   const gratitudeCount = entries.filter((entry) => entry.gratitude?.trim()).length;
   const sensitiveCount = entries.filter((entry) => SENSITIVE.has(entry.category)).length;
@@ -270,7 +304,8 @@ function gameStats(entries) {
     gratitudeCount,
     locationText,
     allText,
-    totalPoints,
+    totalPoints: basePoints,
+    basePoints,
     photoCount,
     sensitiveCount,
     trailCount,
@@ -278,9 +313,16 @@ function gameStats(entries) {
     categoryCounts,
     earthCount,
   };
+  const badges = BADGES.map((badge) => ({ ...badge, points: badgePoints(badge), isEarned: badge.earned(stats) }));
+  const badgeBonusPoints = badges.filter((badge) => badge.isEarned).reduce((sum, badge) => sum + badge.points, 0);
+  const totalPoints = basePoints + badgeBonusPoints;
   return {
     ...stats,
-    badges: BADGES.map((badge) => ({ ...badge, isEarned: badge.earned(stats) })),
+    totalPoints,
+    badgeBonusPoints,
+    level: currentLevel(totalPoints),
+    placeTalk: PLACE_TALKS[(entries.length + badges.filter((badge) => badge.isEarned).length) % PLACE_TALKS.length],
+    badges,
   };
 }
 
@@ -381,27 +423,35 @@ export default function App() {
     </header>
 
     {screen === 'Home' && <section><h2>Colorado Quest Progress</h2>
+      <div className="level-card">
+        <span>Current level</span>
+        <strong>{stats.level.name}</strong>
+        <p>{stats.level.next ? `${stats.level.next.points - stats.totalPoints} points until ${stats.level.next.name}` : 'Highest level reached'}</p>
+      </div>
+      <div className="place-talk"><strong>Place Talk</strong><p>{stats.placeTalk}</p></div>
       <div className="stats">
         <div><strong>{stats.entryCount}</strong><span>discoveries</span></div>
         <div><strong>{stats.totalPoints}</strong><span>quest points</span></div>
         <div><strong>{stats.badges.filter((badge) => badge.isEarned).length}</strong><span>badges earned</span></div>
       </div>
+      <p className="points-preview">{stats.basePoints} discovery points + {stats.badgeBonusPoints} badge bonus points</p>
       <h3>Local badges</h3>
-      <div className="badges">{stats.badges.filter((badge) => badge.isEarned).slice(0, 6).map((badge) => <div className="badge earned" key={badge.name}><strong>{badge.name}</strong><span>Earned</span></div>)}</div>
+      <div className="badges">{stats.badges.filter((badge) => badge.isEarned).slice(0, 6).map((badge) => <div className="badge earned" key={badge.name}><strong>{badge.name}</strong><span>Earned +{badge.points} bonus points</span></div>)}</div>
       <button onClick={() => setScreen('Badges')}>See all badges</button>
     </section>}
 
     {screen === 'Badges' && <section><h2>Badges</h2>
-      <p>{stats.badges.filter((badge) => badge.isEarned).length} of {stats.badges.length} earned</p>
+      <p>{stats.badges.filter((badge) => badge.isEarned).length} of {stats.badges.length} earned. Badge bonuses: {stats.badgeBonusPoints} points.</p>
       {['Northwest Colorado', 'Colorado', 'Earth'].map((group) => <div key={group}>
         <h3>{group}</h3>
-        <div className="badges">{stats.badges.filter((badge) => badge.group === group).map((badge) => <div className={`badge ${badge.isEarned ? 'earned' : ''}`} key={badge.name}><strong>{badge.name}</strong><span>{badge.isEarned ? 'Earned' : badge.description}</span></div>)}</div>
+        <div className="badges">{stats.badges.filter((badge) => badge.group === group).map((badge) => <div className={`badge ${badge.isEarned ? 'earned' : ''}`} key={badge.name}><strong>{badge.name}</strong><span>{badge.isEarned ? `Earned +${badge.points} bonus points` : `${badge.description} +${badge.points} pts`}</span></div>)}</div>
       </div>)}
     </section>}
 
     {screen === 'Profiles' && <section><h2>Profiles</h2><ProfileForm addProfile={addProfile} /><ul>{db.profiles.map((p) => <li key={p.id}>{p.name} — {p.role}</li>)}</ul></section>}
 
     {screen === 'New Discovery' && <section><h2>New Discovery</h2>
+      <div className="place-talk"><strong>Place Talk</strong><p>{stats.placeTalk}</p></div>
       <label>Category<select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></label>
       {SENSITIVE.has(form.category) && <p className="warning">Do not disturb, collect, touch, dig, or publicize this location. Exact GPS will stay private.</p>}
       <label>Title (optional)<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
