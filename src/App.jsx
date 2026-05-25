@@ -26,29 +26,184 @@ const STATUS = ['New', 'Reviewed', 'Needs follow-up', 'Archived'];
 const LAND_ACCESS = ['public land', 'private land', 'unknown', 'permitted area', 'trail/roadside'];
 const BADGES = [
   {
+    group: 'Northwest Colorado',
     name: 'Moffat County Scout',
     description: 'Log your first Colorado Quest discovery.',
     earned: (stats) => stats.entryCount >= 1,
   },
   {
+    group: 'Northwest Colorado',
     name: 'Browns Park Tracker',
     description: 'Log a discovery with Browns Park in the location name.',
     earned: (stats) => stats.locationText.includes('browns park'),
   },
   {
+    group: 'Northwest Colorado',
     name: 'Dinosaur Country Naturalist',
     description: 'Log a discovery with Dinosaur in the location name.',
     earned: (stats) => stats.locationText.includes('dinosaur'),
   },
   {
+    group: 'Northwest Colorado',
     name: 'Yampa River Explorer',
     description: 'Log a discovery with Yampa in the location name.',
     earned: (stats) => stats.locationText.includes('yampa'),
   },
   {
+    group: 'Northwest Colorado',
+    name: 'Green River Wanderer',
+    description: 'Log a discovery with Green River in the location name.',
+    earned: (stats) => stats.locationText.includes('green river'),
+  },
+  {
+    group: 'Northwest Colorado',
+    name: 'Sand Wash Basin Spotter',
+    description: 'Log a discovery with Sand Wash Basin in the location name.',
+    earned: (stats) => stats.locationText.includes('sand wash'),
+  },
+  {
+    group: 'Northwest Colorado',
+    name: 'Maybell Field Scout',
+    description: 'Log a discovery with Maybell in the location name.',
+    earned: (stats) => stats.locationText.includes('maybell'),
+  },
+  {
+    group: 'Northwest Colorado',
+    name: 'Craig Country Observer',
+    description: 'Log a discovery with Craig in the location name.',
+    earned: (stats) => stats.locationText.includes('craig'),
+  },
+  {
+    group: 'Northwest Colorado',
+    name: 'Little Snake Lookout',
+    description: 'Log a discovery with Little Snake in the location name.',
+    earned: (stats) => stats.locationText.includes('little snake'),
+  },
+  {
+    group: 'Northwest Colorado',
+    name: 'Echo Park Pathfinder',
+    description: 'Log a discovery with Echo Park in the location name.',
+    earned: (stats) => stats.locationText.includes('echo park'),
+  },
+  {
+    group: 'Northwest Colorado',
+    name: 'Deerlodge Discoverer',
+    description: 'Log a discovery with Deerlodge in the location name.',
+    earned: (stats) => stats.locationText.includes('deerlodge'),
+  },
+  {
+    group: 'Northwest Colorado',
+    name: 'Vermillion Basin Adventurer',
+    description: 'Log a discovery with Vermillion in the location name.',
+    earned: (stats) => stats.locationText.includes('vermillion'),
+  },
+  {
+    group: 'Northwest Colorado',
+    name: 'Juniper Canyon Naturalist',
+    description: 'Log a discovery with Juniper Canyon in the location name.',
+    earned: (stats) => stats.locationText.includes('juniper canyon'),
+  },
+  {
+    group: 'Northwest Colorado',
+    name: 'Cedar Mountain Climber',
+    description: 'Log a discovery with Cedar Mountain in the location name.',
+    earned: (stats) => stats.locationText.includes('cedar mountain'),
+  },
+  {
+    group: 'Colorado',
     name: 'Northwest Colorado Pathfinder',
     description: 'Log five discoveries and three gratitude notes.',
     earned: (stats) => stats.entryCount >= 5 && stats.gratitudeCount >= 3,
+  },
+  {
+    group: 'Colorado',
+    name: 'Rocky Mountain Observer',
+    description: 'Log ten total discoveries.',
+    earned: (stats) => stats.entryCount >= 10,
+  },
+  {
+    group: 'Colorado',
+    name: 'Red Rock Reader',
+    description: 'Log three rock, mineral, landform, or fossil discoveries.',
+    earned: (stats) => stats.earthCount >= 3,
+  },
+  {
+    group: 'Colorado',
+    name: 'Trail Steward',
+    description: 'Log a discovery on a trail or roadside.',
+    earned: (stats) => stats.trailCount >= 1,
+  },
+  {
+    group: 'Colorado',
+    name: 'Public Lands Guest',
+    description: 'Log a discovery on public land.',
+    earned: (stats) => stats.publicLandCount >= 1,
+  },
+  {
+    group: 'Colorado',
+    name: 'History Seeker',
+    description: 'Log a historic place discovery.',
+    earned: (stats) => stats.categoryCounts['Historic place'] >= 1,
+  },
+  {
+    group: 'Earth',
+    name: 'Rock Cycle Rookie',
+    description: 'Log your first rock or mineral discovery.',
+    earned: (stats) => stats.categoryCounts['Rock / mineral'] >= 1,
+  },
+  {
+    group: 'Earth',
+    name: 'Landform Listener',
+    description: 'Log your first landform discovery.',
+    earned: (stats) => stats.categoryCounts.Landform >= 1,
+  },
+  {
+    group: 'Earth',
+    name: 'Wildlife Witness',
+    description: 'Log your first wildlife, track, or ecology discovery.',
+    earned: (stats) => stats.categoryCounts['Wildlife / track / ecology'] >= 1,
+  },
+  {
+    group: 'Earth',
+    name: 'Fossil Friend',
+    description: 'Log a fossil-looking object and leave it undisturbed.',
+    earned: (stats) => stats.categoryCounts['Fossil-looking object'] >= 1,
+  },
+  {
+    group: 'Earth',
+    name: 'Leave No Trace Hero',
+    description: 'Log any sensitive discovery with care.',
+    earned: (stats) => stats.sensitiveCount >= 1,
+  },
+  {
+    group: 'Earth',
+    name: 'Gratitude Keeper',
+    description: 'Add five gratitude notes.',
+    earned: (stats) => stats.gratitudeCount >= 5,
+  },
+  {
+    group: 'Earth',
+    name: 'Photo Naturalist',
+    description: 'Add ten discovery photos.',
+    earned: (stats) => stats.photoCount >= 10,
+  },
+  {
+    group: 'Earth',
+    name: 'Water Watcher',
+    description: 'Mention river, creek, spring, lake, or water in a note or location.',
+    earned: (stats) => /\b(river|creek|spring|lake|water)\b/.test(stats.allText),
+  },
+  {
+    group: 'Earth',
+    name: 'Sky Noticer',
+    description: 'Mention sky, cloud, sunrise, sunset, moon, or stars in a note.',
+    earned: (stats) => /\b(sky|cloud|sunrise|sunset|moon|stars)\b/.test(stats.allText),
+  },
+  {
+    group: 'Earth',
+    name: 'Kind Explorer',
+    description: 'Add ten gratitude notes or reach 200 quest points.',
+    earned: (stats) => stats.gratitudeCount >= 10 || stats.totalPoints >= 200,
   },
 ];
 
@@ -98,9 +253,31 @@ function entryPoints(entry) {
 
 function gameStats(entries) {
   const locationText = entries.map((entry) => entry.generalLocationName || '').join(' ').toLowerCase();
+  const allText = entries.map((entry) => [entry.title, entry.notes, entry.gratitude, entry.generalLocationName].filter(Boolean).join(' ')).join(' ').toLowerCase();
   const totalPoints = entries.reduce((sum, entry) => sum + entryPoints(entry), 0);
+  const photoCount = entries.reduce((sum, entry) => sum + (entry.photos?.length || 0), 0);
   const gratitudeCount = entries.filter((entry) => entry.gratitude?.trim()).length;
-  const stats = { entryCount: entries.length, gratitudeCount, locationText, totalPoints };
+  const sensitiveCount = entries.filter((entry) => SENSITIVE.has(entry.category)).length;
+  const trailCount = entries.filter((entry) => entry.landAccess === 'trail/roadside').length;
+  const publicLandCount = entries.filter((entry) => entry.landAccess === 'public land').length;
+  const categoryCounts = CATEGORIES.reduce((counts, category) => ({ ...counts, [category]: 0 }), {});
+  entries.forEach((entry) => {
+    categoryCounts[entry.category] = (categoryCounts[entry.category] || 0) + 1;
+  });
+  const earthCount = (categoryCounts['Rock / mineral'] || 0) + (categoryCounts.Landform || 0) + (categoryCounts['Fossil-looking object'] || 0);
+  const stats = {
+    entryCount: entries.length,
+    gratitudeCount,
+    locationText,
+    allText,
+    totalPoints,
+    photoCount,
+    sensitiveCount,
+    trailCount,
+    publicLandCount,
+    categoryCounts,
+    earthCount,
+  };
   return {
     ...stats,
     badges: BADGES.map((badge) => ({ ...badge, isEarned: badge.earned(stats) })),
@@ -200,7 +377,7 @@ export default function App() {
           {db.profiles.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.role})</option>)}
         </select>
       </label>
-      <nav>{['Home', 'New Discovery', 'Journal', 'Map', 'Profiles', 'Settings'].map((s) => <button key={s} onClick={() => setScreen(s)}>{s}</button>)}</nav>
+      <nav>{['Home', 'New Discovery', 'Journal', 'Badges', 'Map', 'Profiles', 'Settings'].map((s) => <button key={s} onClick={() => setScreen(s)}>{s}</button>)}</nav>
     </header>
 
     {screen === 'Home' && <section><h2>Colorado Quest Progress</h2>
@@ -210,7 +387,16 @@ export default function App() {
         <div><strong>{stats.badges.filter((badge) => badge.isEarned).length}</strong><span>badges earned</span></div>
       </div>
       <h3>Local badges</h3>
-      <div className="badges">{stats.badges.map((badge) => <div className={`badge ${badge.isEarned ? 'earned' : ''}`} key={badge.name}><strong>{badge.name}</strong><span>{badge.isEarned ? 'Earned' : badge.description}</span></div>)}</div>
+      <div className="badges">{stats.badges.filter((badge) => badge.isEarned).slice(0, 6).map((badge) => <div className="badge earned" key={badge.name}><strong>{badge.name}</strong><span>Earned</span></div>)}</div>
+      <button onClick={() => setScreen('Badges')}>See all badges</button>
+    </section>}
+
+    {screen === 'Badges' && <section><h2>Badges</h2>
+      <p>{stats.badges.filter((badge) => badge.isEarned).length} of {stats.badges.length} earned</p>
+      {['Northwest Colorado', 'Colorado', 'Earth'].map((group) => <div key={group}>
+        <h3>{group}</h3>
+        <div className="badges">{stats.badges.filter((badge) => badge.group === group).map((badge) => <div className={`badge ${badge.isEarned ? 'earned' : ''}`} key={badge.name}><strong>{badge.name}</strong><span>{badge.isEarned ? 'Earned' : badge.description}</span></div>)}</div>
+      </div>)}
     </section>}
 
     {screen === 'Profiles' && <section><h2>Profiles</h2><ProfileForm addProfile={addProfile} /><ul>{db.profiles.map((p) => <li key={p.id}>{p.name} — {p.role}</li>)}</ul></section>}
