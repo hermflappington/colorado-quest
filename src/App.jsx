@@ -14,6 +14,7 @@ const CATEGORIES = [
   'Rock / mineral',
   'Landform',
   'Historic place',
+  'No visible historic trace',
   'Possible artifact',
   'Rock art / petroglyph',
   'Sacred or significant place',
@@ -44,6 +45,8 @@ const PLACE_TALKS = [
   'What do you want to remember about standing here?',
   'What might a kid standing here 1,000 years from now notice?',
   'What are we borrowing from this place, and how do we give respect back?',
+  'What do you not see here, and what might that still teach us?',
+  'How can quiet places be just as important as famous places?',
 ];
 const BADGES = [
   {
@@ -69,6 +72,18 @@ const BADGES = [
     name: 'Yampa River Explorer',
     description: 'Log a discovery with Yampa in the location name.',
     earned: (stats) => stats.locationText.includes('yampa'),
+  },
+  {
+    group: 'Northwest Colorado',
+    name: 'Irish Canyon Listener',
+    description: 'Log a discovery with Irish Canyon in the location name.',
+    earned: (stats) => stats.locationText.includes('irish canyon'),
+  },
+  {
+    group: 'Northwest Colorado',
+    name: 'Irish Canyon Respectful Guest',
+    description: 'At Irish Canyon, log a no visible historic trace observation.',
+    earned: (stats) => stats.irishCanyonQuietCount >= 1,
   },
   {
     group: 'Northwest Colorado',
@@ -167,6 +182,12 @@ const BADGES = [
     earned: (stats) => stats.categoryCounts['Historic place'] >= 1,
   },
   {
+    group: 'Colorado',
+    name: 'Quiet Place Observer',
+    description: 'Log a place where no visible historic trace is found.',
+    earned: (stats) => stats.categoryCounts['No visible historic trace'] >= 1,
+  },
+  {
     group: 'Earth',
     name: 'Rock Cycle Rookie',
     description: 'Log your first rock or mineral discovery.',
@@ -226,6 +247,12 @@ const BADGES = [
     description: 'Add ten gratitude notes or reach 200 quest points.',
     earned: (stats) => stats.gratitudeCount >= 10 || stats.totalPoints >= 200,
   },
+  {
+    group: 'Earth',
+    name: 'Careful Noticer',
+    description: 'Log three no visible historic trace observations.',
+    earned: (stats) => stats.categoryCounts['No visible historic trace'] >= 3,
+  },
 ];
 
 const icon = new L.Icon({
@@ -269,6 +296,7 @@ function entryPoints(entry) {
   points += (entry.photos?.length || 0) * 5;
   if (entry.gratitude?.trim()) points += 5;
   if (SENSITIVE.has(entry.category)) points += 10;
+  if (entry.category === 'No visible historic trace') points += 10;
   return points;
 }
 
@@ -294,6 +322,7 @@ function gameStats(entries) {
   const sensitiveCount = entries.filter((entry) => SENSITIVE.has(entry.category)).length;
   const trailCount = entries.filter((entry) => entry.landAccess === 'trail/roadside').length;
   const publicLandCount = entries.filter((entry) => entry.landAccess === 'public land').length;
+  const irishCanyonQuietCount = entries.filter((entry) => (entry.generalLocationName || '').toLowerCase().includes('irish canyon') && entry.category === 'No visible historic trace').length;
   const categoryCounts = CATEGORIES.reduce((counts, category) => ({ ...counts, [category]: 0 }), {});
   entries.forEach((entry) => {
     categoryCounts[entry.category] = (categoryCounts[entry.category] || 0) + 1;
@@ -310,6 +339,7 @@ function gameStats(entries) {
     sensitiveCount,
     trailCount,
     publicLandCount,
+    irishCanyonQuietCount,
     categoryCounts,
     earthCount,
   };
@@ -363,6 +393,7 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [revealed, setRevealed] = useState({});
   const [form, setForm] = useState(initialForm);
+  const [editForm, setEditForm] = useState(null);
 
   useEffect(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(db)), [db]);
 
@@ -382,8 +413,32 @@ export default function App() {
     setScreen('Journal');
   };
 
+  const startEditEntry = (entry) => {
+    setEditForm({
+      ...entry,
+      lat: String(entry.lat || ''),
+      lng: String(entry.lng || ''),
+      gratitude: entry.gratitude || '',
+      profileIds: entry.profileIds || [],
+      photos: entry.photos || [],
+    });
+    setScreen('Edit Entry');
+  };
+
+  const saveEditEntry = () => {
+    const title = editForm.title.trim() || autoTitle(editForm.category, editForm.notes, editForm.generalLocationName);
+    const updated = { ...editForm, title, lat: Number(editForm.lat), lng: Number(editForm.lng) };
+    setSelected(updated);
+    setDb((d) => ({ ...d, entries: d.entries.map((entry) => entry.id === updated.id ? updated : entry) }));
+    setScreen('Entry Detail');
+  };
+
   const captureGps = () => navigator.geolocation.getCurrentPosition((p) => {
     setForm((f) => ({ ...f, lat: p.coords.latitude, lng: p.coords.longitude }));
+  });
+
+  const captureEditGps = () => navigator.geolocation.getCurrentPosition((p) => {
+    setEditForm((f) => ({ ...f, lat: p.coords.latitude, lng: p.coords.longitude }));
   });
 
   const onPhoto = async (files) => {
@@ -393,6 +448,15 @@ export default function App() {
       next.push(data);
     }
     setForm((f) => ({ ...f, photos: [...f.photos, ...next] }));
+  };
+
+  const onEditPhoto = async (files) => {
+    const next = [];
+    for (const file of files) {
+      const data = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file); });
+      next.push(data);
+    }
+    setEditForm((f) => ({ ...f, photos: [...f.photos, ...next] }));
   };
 
   const canRevealSensitive = activeProfile?.role === 'adult';
@@ -453,6 +517,7 @@ export default function App() {
     {screen === 'New Discovery' && <section><h2>New Discovery</h2>
       <div className="place-talk"><strong>Place Talk</strong><p>{stats.placeTalk}</p></div>
       <label>Category<select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></label>
+      {form.category === 'No visible historic trace' && <p className="quiet-note">Quiet observation counts. You can earn points for noticing a place respectfully, even when you do not find obvious history.</p>}
       {SENSITIVE.has(form.category) && <p className="warning">Do not disturb, collect, touch, dig, or publicize this location. Exact GPS will stay private.</p>}
       <label>Title (optional)<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
       <label>Notes (optional)<textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
@@ -475,10 +540,33 @@ export default function App() {
     {screen === 'Entry Detail' && selected && <section><h2>{selected.title}</h2><p>{selected.category}</p><p>Quest points: {entryPoints(selected)}</p><p>General location: {selected.generalLocationName || 'Not set'}</p><p>Confidence: {selected.confidence}</p><p>Status: {selected.status}</p><p>Land access: {selected.landAccess}</p><p>{selected.notes || 'No notes.'}</p><p>Gratitude: {selected.gratitude || 'Not added yet.'}</p><p>Credits: {selected.profileIds.map((id) => db.profiles.find((p) => p.id === id)?.name).filter(Boolean).join(', ') || 'None'}</p><div className="photos">{selected.photos.map((p, i) => <img key={i} src={p} alt="entry" />)}</div>
       {SENSITIVE.has(selected.category) && !revealed[selected.id] ? <div><p>Exact GPS hidden (sensitive category).</p>{canRevealSensitive ? <button onMouseDown={() => beginRevealHold(selected.id)} onMouseUp={cancelRevealHold} onMouseLeave={cancelRevealHold} onTouchStart={() => beginRevealHold(selected.id)} onTouchEnd={cancelRevealHold} onTouchCancel={cancelRevealHold}>Hold 2s to reveal (adult only)</button> : <p>Active profile is kid; only approximate location is visible.</p>}</div> : <p>GPS: {formatGps(selected.lat, selected.lng)}</p>}
       <div className="actions">
+        <button onClick={() => startEditEntry(selected)}>Edit Entry</button>
         <button onClick={() => { setDb((d) => ({ ...d, entries: d.entries.filter((x) => x.id !== selected.id) })); setScreen('Journal'); setSelected(null); }}>Delete Entry</button>
         <label>Change status<select value={selected.status} onChange={(e) => { const status = e.target.value; setSelected((v) => ({ ...v, status })); setDb((d) => ({ ...d, entries: d.entries.map((x) => x.id === selected.id ? { ...x, status } : x) })); }} >{STATUS.map((s) => <option key={s}>{s}</option>)}</select></label>
         <label>Change confidence<select value={selected.confidence} onChange={(e) => { const confidence = e.target.value; setSelected((v) => ({ ...v, confidence })); setDb((d) => ({ ...d, entries: d.entries.map((x) => x.id === selected.id ? { ...x, confidence } : x) })); }} >{CONFIDENCE.map((c) => <option key={c}>{c}</option>)}</select></label>
         <button onClick={() => { const status = 'Reviewed'; setSelected((v) => ({ ...v, status })); setDb((d) => ({ ...d, entries: d.entries.map((x) => x.id === selected.id ? { ...x, status } : x) })); }}>Mark Reviewed</button>
+      </div>
+    </section>}
+
+    {screen === 'Edit Entry' && editForm && <section><h2>Edit Entry</h2>
+      <label>Category<select value={editForm.category} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></label>
+      {editForm.category === 'No visible historic trace' && <p className="quiet-note">Quiet observation counts. You can earn points for noticing a place respectfully, even when you do not find obvious history.</p>}
+      {SENSITIVE.has(editForm.category) && <p className="warning">Do not disturb, collect, touch, dig, or publicize this location. Exact GPS will stay private.</p>}
+      <label>Title<input value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} /></label>
+      <label>Notes<textarea value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} /></label>
+      <label>What are you thankful for here?<textarea value={editForm.gratitude} onChange={(e) => setEditForm({ ...editForm, gratitude: e.target.value })} /></label>
+      <label>General location name<input value={editForm.generalLocationName} onChange={(e) => setEditForm({ ...editForm, generalLocationName: e.target.value })} /></label>
+      <label>Confidence<select value={editForm.confidence} onChange={(e) => setEditForm({ ...editForm, confidence: e.target.value })}>{CONFIDENCE.map((c) => <option key={c}>{c}</option>)}</select></label>
+      <label>Status<select value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}>{STATUS.map((s) => <option key={s}>{s}</option>)}</select></label>
+      <label>Land access<select value={editForm.landAccess} onChange={(e) => setEditForm({ ...editForm, landAccess: e.target.value })}>{LAND_ACCESS.map((v) => <option key={v}>{v}</option>)}</select></label>
+      <fieldset><legend>People credited</legend>{db.profiles.map((p) => <label key={p.id}><input type="checkbox" checked={editForm.profileIds.includes(p.id)} onChange={(e) => setEditForm((f) => ({ ...f, profileIds: e.target.checked ? [...f.profileIds, p.id] : f.profileIds.filter((id) => id !== p.id) }))} />{p.name} ({p.role})</label>)}</fieldset>
+      <label>Add photos<input type="file" accept="image/*" multiple onChange={(e) => onEditPhoto(e.target.files)} /></label>
+      <div className="photos">{editForm.photos.map((p, i) => <div className="photo-edit" key={`${p.slice(0, 24)}-${i}`}><img src={p} alt="entry" /><button onClick={() => setEditForm((f) => ({ ...f, photos: f.photos.filter((_, index) => index !== i) }))}>Remove</button></div>)}</div>
+      <button onClick={captureEditGps}>Update GPS to Here</button>
+      <p>{editForm.lat && editForm.lng ? formatGps(Number(editForm.lat), Number(editForm.lng)) : 'No GPS saved'}</p>
+      <div className="actions">
+        <button disabled={!editForm.category || editForm.profileIds.length === 0 || editForm.photos.length === 0 || !editForm.lat || !editForm.lng} onClick={saveEditEntry}>Save Changes</button>
+        <button onClick={() => { setEditForm(null); setScreen('Entry Detail'); }}>Cancel</button>
       </div>
     </section>}
 
