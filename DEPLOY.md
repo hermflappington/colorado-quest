@@ -33,6 +33,15 @@ Then tap **Deploy**.
 3. Tap the URL directly in Vercel to open the live preview on your phone.
 4. Optional: tap the browser share menu and **Add to Home Screen** for app-like access.
 
+## Offline phone install
+After the site is deployed, open it once on the phone while online.
+
+- **iPhone:** Safari → Share → Add to Home Screen.
+- **Android:** Chrome → menu → Install app or Add to Home screen.
+
+The app shell and visited assets are cached for offline use. Discoveries are still stored locally on that specific phone/browser.
+
 ## Notes
 - This app is static/local-first and does not require a backend.
 - Discovery data is stored in each phone/browser locally.
+- Map tiles may need an internet connection unless they were already cached by the browser.

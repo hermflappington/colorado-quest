@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Colorado Quest icon">
+  <rect width="512" height="512" rx="96" fill="#1a3d2f"/>
+  <path d="M74 338 178 194l70 92 52-68 138 120H74Z" fill="#f4f7f2"/>
+  <path d="M178 194 248 286 300 218 438 338H74l104-144Z" fill="#d8e7cf"/>
+  <path d="M178 194 214 241l-44-13-37 51 45-85Z" fill="#ffffff"/>
+  <path d="M300 218 339 252l-45-12-34 45 40-67Z" fill="#ffffff"/>
+  <circle cx="352" cy="146" r="38" fill="#f6c35b"/>
+  <path d="M126 382h260" stroke="#f6c35b" stroke-width="28" stroke-linecap="round"/>
+  <path d="M174 382h72" stroke="#8bc4a7" stroke-width="28" stroke-linecap="round"/>
+</svg>
