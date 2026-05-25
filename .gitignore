@@ -1,0 +1,4 @@
+node_modules/
+dist/
+.codex-tools/
+vite-dev.log

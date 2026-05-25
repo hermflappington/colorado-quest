@@ -61,6 +61,7 @@ function formatGps(lat, lng) {
   return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 }
 
+
 function exportBackup(data) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
