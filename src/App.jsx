@@ -263,7 +263,11 @@ const icon = new L.Icon({
 });
 
 const starterAdult = { id: crypto.randomUUID(), name: 'Adult', role: 'adult' };
-const blank = { profiles: [starterAdult], activeProfileId: starterAdult.id, entries: [], safetyAck: false };
+const blank = { profiles: [starterAdult], activeProfileId: starterAdult.id, entries: [], safetyAck: false, activeAdventure: null };
+
+function pickAdventureCategories() {
+  return [...CATEGORIES].sort(() => Math.random() - 0.5).slice(0, 5);
+}
 
 const initialForm = {
   title: '', notes: '', category: CATEGORIES[0], profileIds: [], photos: [], lat: '', lng: '',
@@ -408,10 +412,24 @@ export default function App() {
   const createEntry = () => {
     const title = form.title.trim() || autoTitle(form.category, form.notes, form.generalLocationName);
     const entry = { ...form, id: crypto.randomUUID(), title, createdAt: Date.now(), lat: Number(form.lat), lng: Number(form.lng) };
-    setDb((d) => ({ ...d, entries: [entry, ...d.entries] }));
+    setDb((d) => {
+      const adventure = d.activeAdventure;
+      const activeAdventure = adventure && adventure.categories.includes(entry.category) && !adventure.found.includes(entry.category)
+        ? { ...adventure, found: [...adventure.found, entry.category] }
+        : adventure;
+      return { ...d, entries: [entry, ...d.entries], activeAdventure };
+    });
     setForm(initialForm);
     setScreen('Journal');
   };
+
+  const startAdventure = () => setDb((d) => ({ ...d, activeAdventure: { id: crypto.randomUUID(), categories: pickAdventureCategories(), found: [], createdAt: Date.now() } }));
+  const endAdventure = () => setDb((d) => ({ ...d, activeAdventure: null }));
+  const markFound = (category) => setDb((d) => {
+    const adventure = d.activeAdventure;
+    if (!adventure || adventure.found.includes(category)) return d;
+    return { ...d, activeAdventure: { ...adventure, found: [...adventure.found, category] } };
+  });
 
   const startEditEntry = (entry) => {
     setEditForm({
@@ -487,6 +505,27 @@ export default function App() {
     </header>
 
     {screen === 'Home' && <section><h2>Colorado Quest Progress</h2>
+      <div className="adventure-card">
+        {db.activeAdventure ? <>
+          <h3>Find These 5 Things</h3>
+          <ul className="find-list">
+            {db.activeAdventure.categories.map((c) => {
+              const found = db.activeAdventure.found.includes(c);
+              return <li key={c} className={found ? 'found' : ''}>
+                <span>{found ? '✅' : '🔍'} {c}</span>
+                {!found && <button onClick={() => markFound(c)}>Found it!</button>}
+              </li>;
+            })}
+          </ul>
+          {db.activeAdventure.found.length === db.activeAdventure.categories.length
+            ? <><p className="celebrate">🎉 Adventure complete! Great job!</p><button className="cta" onClick={startAdventure}>Start a New Adventure</button></>
+            : <button onClick={endAdventure}>End Adventure</button>}
+        </> : <>
+          <h3>Ready for an adventure?</h3>
+          <p>Roll 5 things to find on your next hike or outing.</p>
+          <button className="cta" onClick={startAdventure}>Start New Adventure</button>
+        </>}
+      </div>
       <div className="level-card">
         <span>Current level</span>
         <strong>{stats.level.name}</strong>
@@ -519,18 +558,21 @@ export default function App() {
       <label>Category<select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></label>
       {form.category === 'No visible historic trace' && <p className="quiet-note">Quiet observation counts. You can earn points for noticing a place respectfully, even when you do not find obvious history.</p>}
       {SENSITIVE.has(form.category) && <p className="warning">Do not disturb, collect, touch, dig, or publicize this location. Exact GPS will stay private.</p>}
-      <label>Title (optional)<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
-      <label>Notes (optional)<textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
-      <label>What are you thankful for here? (optional)<textarea value={form.gratitude} onChange={(e) => setForm({ ...form, gratitude: e.target.value })} /></label>
-      <label>General location name<input value={form.generalLocationName} onChange={(e) => setForm({ ...form, generalLocationName: e.target.value })} /></label>
-      <label>Confidence<select value={form.confidence} onChange={(e) => setForm({ ...form, confidence: e.target.value })}>{CONFIDENCE.map((c) => <option key={c}>{c}</option>)}</select></label>
-      <label>Status<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>{STATUS.map((s) => <option key={s}>{s}</option>)}</select></label>
-      <label>Land access<select value={form.landAccess} onChange={(e) => setForm({ ...form, landAccess: e.target.value })}>{LAND_ACCESS.map((v) => <option key={v}>{v}</option>)}</select></label>
       <fieldset><legend>People credited (required)</legend>{db.profiles.map((p) => <label key={p.id}><input type="checkbox" checked={form.profileIds.includes(p.id)} onChange={(e) => setForm((f) => ({ ...f, profileIds: e.target.checked ? [...f.profileIds, p.id] : f.profileIds.filter((id) => id !== p.id) }))} />{p.name} ({p.role})</label>)}</fieldset>
       <label>Photos (required)<input type="file" accept="image/*" multiple onChange={(e) => onPhoto(e.target.files)} /></label>
       <div className="photos">{form.photos.map((p, i) => <img key={i} src={p} alt="discovery" />)}</div>
       <button onClick={captureGps}>Capture GPS</button>
       <p>{form.lat && form.lng ? formatGps(Number(form.lat), Number(form.lng)) : 'No GPS yet (required)'}</p>
+      <details>
+        <summary>Add more details (optional)</summary>
+        <label>Title<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
+        <label>Notes<textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
+        <label>What are you thankful for here?<textarea value={form.gratitude} onChange={(e) => setForm({ ...form, gratitude: e.target.value })} /></label>
+        <label>General location name<input value={form.generalLocationName} onChange={(e) => setForm({ ...form, generalLocationName: e.target.value })} /></label>
+        <label>Confidence<select value={form.confidence} onChange={(e) => setForm({ ...form, confidence: e.target.value })}>{CONFIDENCE.map((c) => <option key={c}>{c}</option>)}</select></label>
+        <label>Status<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>{STATUS.map((s) => <option key={s}>{s}</option>)}</select></label>
+        <label>Land access<select value={form.landAccess} onChange={(e) => setForm({ ...form, landAccess: e.target.value })}>{LAND_ACCESS.map((v) => <option key={v}>{v}</option>)}</select></label>
+      </details>
       <p className="points-preview">This discovery can earn {entryPoints(form)} quest points.</p>
       <button disabled={!canSave} onClick={createEntry}>Save Discovery</button>
     </section>}
