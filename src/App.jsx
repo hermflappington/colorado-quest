@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -269,6 +269,28 @@ function pickAdventureCategories() {
   return [...CATEGORIES].sort(() => Math.random() - 0.5).slice(0, 5);
 }
 
+// Re-encodes photo through canvas: strips EXIF (including GPS), resizes to max 1200px, compresses.
+async function processPhoto(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const MAX = 1200;
+      let { naturalWidth: w, naturalHeight: h } = img;
+      if (w > MAX || h > MAX) {
+        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+        else { w = Math.round(w * MAX / h); h = MAX; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', 0.8));
+    };
+    img.src = url;
+  });
+}
+
 const initialForm = {
   title: '', notes: '', category: CATEGORIES[0], profileIds: [], photos: [], lat: '', lng: '',
   confidence: CONFIDENCE[0], status: STATUS[0], generalLocationName: '', landAccess: LAND_ACCESS[2], gratitude: '',
@@ -277,7 +299,15 @@ const initialForm = {
 function load() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    return { ...blank, ...saved };
+    const merged = { ...blank, ...saved };
+    if (!merged.profiles.find((p) => p.id === merged.activeProfileId)) {
+      merged.activeProfileId = merged.profiles[0]?.id ?? blank.activeProfileId;
+    }
+    const adv = merged.activeAdventure;
+    if (adv && (!Array.isArray(adv.categories) || !Array.isArray(adv.found) || adv.categories.some((c) => !CATEGORIES.includes(c)))) {
+      merged.activeAdventure = null;
+    }
+    return merged;
   } catch {
     return blank;
   }
@@ -327,10 +357,8 @@ function gameStats(entries) {
   const trailCount = entries.filter((entry) => entry.landAccess === 'trail/roadside').length;
   const publicLandCount = entries.filter((entry) => entry.landAccess === 'public land').length;
   const irishCanyonQuietCount = entries.filter((entry) => (entry.generalLocationName || '').toLowerCase().includes('irish canyon') && entry.category === 'No visible historic trace').length;
-  const categoryCounts = CATEGORIES.reduce((counts, category) => ({ ...counts, [category]: 0 }), {});
-  entries.forEach((entry) => {
-    categoryCounts[entry.category] = (categoryCounts[entry.category] || 0) + 1;
-  });
+  const categoryCounts = Object.fromEntries(CATEGORIES.map((c) => [c, 0]));
+  entries.forEach((entry) => { if (entry.category in categoryCounts) categoryCounts[entry.category]++; });
   const earthCount = (categoryCounts['Rock / mineral'] || 0) + (categoryCounts.Landform || 0) + (categoryCounts['Fossil-looking object'] || 0);
   const stats = {
     entryCount: entries.length,
@@ -360,7 +388,6 @@ function gameStats(entries) {
   };
 }
 
-
 function exportBackup(data) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -383,6 +410,13 @@ function importBackupFile(file, currentDb, setDb) {
       }
       if (!window.confirm('Restore backup and replace current local data?')) return;
       const next = { ...currentDb, ...incoming };
+      if (!next.profiles.find((p) => p.id === next.activeProfileId)) {
+        next.activeProfileId = next.profiles[0]?.id ?? currentDb.activeProfileId;
+      }
+      const adv = next.activeAdventure;
+      if (adv && (!Array.isArray(adv.categories) || !Array.isArray(adv.found))) {
+        next.activeAdventure = null;
+      }
       setDb(next);
     } catch {
       alert('Unable to import backup file.');
@@ -394,16 +428,41 @@ function importBackupFile(file, currentDb, setDb) {
 export default function App() {
   const [db, setDb] = useState(load);
   const [screen, setScreen] = useState('Home');
-  const [selected, setSelected] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
   const [revealed, setRevealed] = useState({});
   const [form, setForm] = useState(initialForm);
   const [editForm, setEditForm] = useState(null);
 
-  useEffect(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(db)), [db]);
+  const saveTimer = useRef(null);
+  const dbRef = useRef(db);
+  const holdTimer = useRef(null);
+
+  useEffect(() => { dbRef.current = db; }, [db]);
+
+  useEffect(() => {
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(db)), 300);
+    return () => clearTimeout(saveTimer.current);
+  }, [db]);
+
+  useEffect(() => {
+    const flush = () => localStorage.setItem(STORAGE_KEY, JSON.stringify(dbRef.current));
+    window.addEventListener('beforeunload', flush);
+    return () => window.removeEventListener('beforeunload', flush);
+  }, []);
+
+  useEffect(() => {
+    if (screen !== 'Entry Detail') {
+      clearTimeout(holdTimer.current);
+      holdTimer.current = null;
+      setRevealed({});
+    }
+  }, [screen]);
 
   const sortedEntries = useMemo(() => [...db.entries].sort((a, b) => b.createdAt - a.createdAt), [db.entries]);
   const stats = useMemo(() => gameStats(db.entries), [db.entries]);
   const activeProfile = db.profiles.find((p) => p.id === db.activeProfileId);
+  const selected = useMemo(() => db.entries.find((e) => e.id === selectedId) ?? null, [db.entries, selectedId]);
 
   const addProfile = (name, role) => setDb((d) => ({ ...d, profiles: [...d.profiles, { id: crypto.randomUUID(), name, role }] }));
 
@@ -446,47 +505,38 @@ export default function App() {
   const saveEditEntry = () => {
     const title = editForm.title.trim() || autoTitle(editForm.category, editForm.notes, editForm.generalLocationName);
     const updated = { ...editForm, title, lat: Number(editForm.lat), lng: Number(editForm.lng) };
-    setSelected(updated);
     setDb((d) => ({ ...d, entries: d.entries.map((entry) => entry.id === updated.id ? updated : entry) }));
     setScreen('Entry Detail');
   };
 
-  const captureGps = () => navigator.geolocation.getCurrentPosition((p) => {
-    setForm((f) => ({ ...f, lat: p.coords.latitude, lng: p.coords.longitude }));
-  });
+  const captureGps = () => navigator.geolocation.getCurrentPosition(
+    (p) => setForm((f) => ({ ...f, lat: p.coords.latitude, lng: p.coords.longitude })),
+    () => alert('Unable to get GPS. Please check location permissions.'),
+  );
 
-  const captureEditGps = () => navigator.geolocation.getCurrentPosition((p) => {
-    setEditForm((f) => ({ ...f, lat: p.coords.latitude, lng: p.coords.longitude }));
-  });
+  const captureEditGps = () => navigator.geolocation.getCurrentPosition(
+    (p) => setEditForm((f) => ({ ...f, lat: p.coords.latitude, lng: p.coords.longitude })),
+    () => alert('Unable to get GPS. Please check location permissions.'),
+  );
 
   const onPhoto = async (files) => {
-    const next = [];
-    for (const file of files) {
-      const data = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file); });
-      next.push(data);
-    }
+    const next = await Promise.all(Array.from(files).map(processPhoto));
     setForm((f) => ({ ...f, photos: [...f.photos, ...next] }));
   };
 
   const onEditPhoto = async (files) => {
-    const next = [];
-    for (const file of files) {
-      const data = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file); });
-      next.push(data);
-    }
+    const next = await Promise.all(Array.from(files).map(processPhoto));
     setEditForm((f) => ({ ...f, photos: [...f.photos, ...next] }));
   };
 
   const canRevealSensitive = activeProfile?.role === 'adult';
-  const [holdTimer, setHoldTimer] = useState(null);
   const beginRevealHold = (id) => {
     if (!canRevealSensitive) return;
-    const timer = setTimeout(() => setRevealed((r) => ({ ...r, [id]: true })), 2000);
-    setHoldTimer(timer);
+    holdTimer.current = setTimeout(() => setRevealed((r) => ({ ...r, [id]: true })), 2000);
   };
   const cancelRevealHold = () => {
-    if (holdTimer) clearTimeout(holdTimer);
-    setHoldTimer(null);
+    clearTimeout(holdTimer.current);
+    holdTimer.current = null;
   };
 
   if (!db.safetyAck) {
@@ -512,13 +562,13 @@ export default function App() {
             {db.activeAdventure.categories.map((c) => {
               const found = db.activeAdventure.found.includes(c);
               return <li key={c} className={found ? 'found' : ''}>
-                <span>{found ? '✅' : '🔍'} {c}</span>
+                <span><span aria-hidden="true">{found ? '✅' : '🔍'}</span> {c}</span>
                 {!found && <button onClick={() => markFound(c)}>Found it!</button>}
               </li>;
             })}
           </ul>
           {db.activeAdventure.found.length === db.activeAdventure.categories.length
-            ? <><p className="celebrate">🎉 Adventure complete! Great job!</p><button className="cta" onClick={startAdventure}>Start a New Adventure</button></>
+            ? <><p className="celebrate"><span aria-hidden="true">🎉</span> Adventure complete! Great job!</p><button className="cta" onClick={startAdventure}>Start a New Adventure</button></>
             : <button onClick={endAdventure}>End Adventure</button>}
         </> : <>
           <h3>Ready for an adventure?</h3>
@@ -560,7 +610,7 @@ export default function App() {
       {SENSITIVE.has(form.category) && <p className="warning">Do not disturb, collect, touch, dig, or publicize this location. Exact GPS will stay private.</p>}
       <fieldset><legend>People credited (required)</legend>{db.profiles.map((p) => <label key={p.id}><input type="checkbox" checked={form.profileIds.includes(p.id)} onChange={(e) => setForm((f) => ({ ...f, profileIds: e.target.checked ? [...f.profileIds, p.id] : f.profileIds.filter((id) => id !== p.id) }))} />{p.name} ({p.role})</label>)}</fieldset>
       <label>Photos (required)<input type="file" accept="image/*" multiple onChange={(e) => onPhoto(e.target.files)} /></label>
-      <div className="photos">{form.photos.map((p, i) => <img key={i} src={p} alt="discovery" />)}</div>
+      <div className="photos">{form.photos.map((p, i) => <img key={i} src={p} alt={`Discovery photo ${i + 1}`} />)}</div>
       <button onClick={captureGps}>Capture GPS</button>
       <p>{form.lat && form.lng ? formatGps(Number(form.lat), Number(form.lng)) : 'No GPS yet (required)'}</p>
       <details>
@@ -577,16 +627,16 @@ export default function App() {
       <button disabled={!canSave} onClick={createEntry}>Save Discovery</button>
     </section>}
 
-    {screen === 'Journal' && <section><h2>Journal</h2>{sortedEntries.map((e) => <article key={e.id}><button onClick={() => { setSelected(e); setScreen('Entry Detail'); }}>{new Date(e.createdAt).toLocaleString()} - {e.title} ({entryPoints(e)} pts)</button></article>)}</section>}
+    {screen === 'Journal' && <section><h2>Journal</h2>{sortedEntries.map((e) => <article key={e.id}><button onClick={() => { setSelectedId(e.id); setScreen('Entry Detail'); }}>{new Date(e.createdAt).toLocaleString()} - {e.title} ({entryPoints(e)} pts)</button></article>)}</section>}
 
-    {screen === 'Entry Detail' && selected && <section><h2>{selected.title}</h2><p>{selected.category}</p><p>Quest points: {entryPoints(selected)}</p><p>General location: {selected.generalLocationName || 'Not set'}</p><p>Confidence: {selected.confidence}</p><p>Status: {selected.status}</p><p>Land access: {selected.landAccess}</p><p>{selected.notes || 'No notes.'}</p><p>Gratitude: {selected.gratitude || 'Not added yet.'}</p><p>Credits: {selected.profileIds.map((id) => db.profiles.find((p) => p.id === id)?.name).filter(Boolean).join(', ') || 'None'}</p><div className="photos">{selected.photos.map((p, i) => <img key={i} src={p} alt="entry" />)}</div>
-      {SENSITIVE.has(selected.category) && !revealed[selected.id] ? <div><p>Exact GPS hidden (sensitive category).</p>{canRevealSensitive ? <button onMouseDown={() => beginRevealHold(selected.id)} onMouseUp={cancelRevealHold} onMouseLeave={cancelRevealHold} onTouchStart={() => beginRevealHold(selected.id)} onTouchEnd={cancelRevealHold} onTouchCancel={cancelRevealHold}>Hold 2s to reveal (adult only)</button> : <p>Active profile is kid; only approximate location is visible.</p>}</div> : <p>GPS: {formatGps(selected.lat, selected.lng)}</p>}
+    {screen === 'Entry Detail' && selected && <section><h2>{selected.title}</h2><p>{selected.category}</p><p>Quest points: {entryPoints(selected)}</p><p>General location: {selected.generalLocationName || 'Not set'}</p><p>Confidence: {selected.confidence}</p><p>Status: {selected.status}</p><p>Land access: {selected.landAccess}</p><p>{selected.notes || 'No notes.'}</p><p>Gratitude: {selected.gratitude || 'Not added yet.'}</p><p>Credits: {selected.profileIds.map((id) => db.profiles.find((p) => p.id === id)?.name).filter(Boolean).join(', ') || 'None'}</p><div className="photos">{selected.photos.map((p, i) => <img key={i} src={p} alt={`Photo ${i + 1} for ${selected.title}`} />)}</div>
+      {SENSITIVE.has(selected.category) && !revealed[selected.id] ? <div><p>Exact GPS hidden (sensitive category).</p>{canRevealSensitive ? <button onMouseDown={() => beginRevealHold(selected.id)} onMouseUp={cancelRevealHold} onMouseLeave={cancelRevealHold} onTouchStart={() => beginRevealHold(selected.id)} onTouchEnd={cancelRevealHold} onTouchCancel={cancelRevealHold} onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); beginRevealHold(selected.id); } }} onKeyUp={(e) => { if (e.key === ' ' || e.key === 'Enter') cancelRevealHold(); }}>Hold 2s to reveal (adult only)</button> : <p>Active profile is kid; only approximate location is visible.</p>}</div> : <p>GPS: {formatGps(selected.lat, selected.lng)}</p>}
       <div className="actions">
         <button onClick={() => startEditEntry(selected)}>Edit Entry</button>
-        <button onClick={() => { setDb((d) => ({ ...d, entries: d.entries.filter((x) => x.id !== selected.id) })); setScreen('Journal'); setSelected(null); }}>Delete Entry</button>
-        <label>Change status<select value={selected.status} onChange={(e) => { const status = e.target.value; setSelected((v) => ({ ...v, status })); setDb((d) => ({ ...d, entries: d.entries.map((x) => x.id === selected.id ? { ...x, status } : x) })); }} >{STATUS.map((s) => <option key={s}>{s}</option>)}</select></label>
-        <label>Change confidence<select value={selected.confidence} onChange={(e) => { const confidence = e.target.value; setSelected((v) => ({ ...v, confidence })); setDb((d) => ({ ...d, entries: d.entries.map((x) => x.id === selected.id ? { ...x, confidence } : x) })); }} >{CONFIDENCE.map((c) => <option key={c}>{c}</option>)}</select></label>
-        <button onClick={() => { const status = 'Reviewed'; setSelected((v) => ({ ...v, status })); setDb((d) => ({ ...d, entries: d.entries.map((x) => x.id === selected.id ? { ...x, status } : x) })); }}>Mark Reviewed</button>
+        <button onClick={() => { setDb((d) => ({ ...d, entries: d.entries.filter((x) => x.id !== selected.id) })); setScreen('Journal'); setSelectedId(null); }}>Delete Entry</button>
+        <label>Change status<select value={selected.status} onChange={(e) => { const status = e.target.value; setDb((d) => ({ ...d, entries: d.entries.map((x) => x.id === selected.id ? { ...x, status } : x) })); }}>{STATUS.map((s) => <option key={s}>{s}</option>)}</select></label>
+        <label>Change confidence<select value={selected.confidence} onChange={(e) => { const confidence = e.target.value; setDb((d) => ({ ...d, entries: d.entries.map((x) => x.id === selected.id ? { ...x, confidence } : x) })); }}>{CONFIDENCE.map((c) => <option key={c}>{c}</option>)}</select></label>
+        <button onClick={() => { setDb((d) => ({ ...d, entries: d.entries.map((x) => x.id === selected.id ? { ...x, status: 'Reviewed' } : x) })); }}>Mark Reviewed</button>
       </div>
     </section>}
 
@@ -603,7 +653,7 @@ export default function App() {
       <label>Land access<select value={editForm.landAccess} onChange={(e) => setEditForm({ ...editForm, landAccess: e.target.value })}>{LAND_ACCESS.map((v) => <option key={v}>{v}</option>)}</select></label>
       <fieldset><legend>People credited</legend>{db.profiles.map((p) => <label key={p.id}><input type="checkbox" checked={editForm.profileIds.includes(p.id)} onChange={(e) => setEditForm((f) => ({ ...f, profileIds: e.target.checked ? [...f.profileIds, p.id] : f.profileIds.filter((id) => id !== p.id) }))} />{p.name} ({p.role})</label>)}</fieldset>
       <label>Add photos<input type="file" accept="image/*" multiple onChange={(e) => onEditPhoto(e.target.files)} /></label>
-      <div className="photos">{editForm.photos.map((p, i) => <div className="photo-edit" key={`${p.slice(0, 24)}-${i}`}><img src={p} alt="entry" /><button onClick={() => setEditForm((f) => ({ ...f, photos: f.photos.filter((_, index) => index !== i) }))}>Remove</button></div>)}</div>
+      <div className="photos">{editForm.photos.map((p, i) => <div className="photo-edit" key={`${p.slice(0, 24)}-${i}`}><img src={p} alt={`Photo ${i + 1}`} /><button onClick={() => setEditForm((f) => ({ ...f, photos: f.photos.filter((_, index) => index !== i) }))}>Remove</button></div>)}</div>
       <button onClick={captureEditGps}>Update GPS to Here</button>
       <p>{editForm.lat && editForm.lng ? formatGps(Number(editForm.lat), Number(editForm.lng)) : 'No GPS saved'}</p>
       <div className="actions">
@@ -614,7 +664,7 @@ export default function App() {
 
     {screen === 'Map' && <section><h2>Map</h2><MapContainer center={[39.7392, -104.9903]} zoom={8} style={{ height: '55vh' }}><TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />{db.entries.map((e) => {const hidden = SENSITIVE.has(e.category); const lat = hidden ? Math.round(e.lat * 100) / 100 : e.lat; const lng = hidden ? Math.round(e.lng * 100) / 100 : e.lng; return <Marker key={e.id} position={[lat, lng]} icon={icon}><Popup><strong>{e.title}</strong><br />{e.category}<br />{hidden ? 'Approximate location shown' : formatGps(e.lat, e.lng)}</Popup></Marker>;})}</MapContainer></section>}
 
-    {screen === 'Settings' && <section><h2>Settings</h2><p className="warning">Local browser data can be lost if site data/cache is cleared. Export backups regularly.</p><button onClick={() => { localStorage.removeItem(STORAGE_KEY); setDb(blank); }}>Reset Local Data</button><button onClick={() => exportBackup(db)}>Export Backup</button><label>Import Backup<input type="file" accept="application/json" onChange={(e) => importBackupFile(e.target.files?.[0], db, setDb)} /></label><p>Data stored on this device only.</p></section>}
+    {screen === 'Settings' && <section><h2>Settings</h2><p className="warning">Local browser data can be lost if site data/cache is cleared. Export backups regularly.</p><button onClick={() => { if (!window.confirm('Delete all local data? This cannot be undone.')) return; localStorage.removeItem(STORAGE_KEY); setDb(blank); }}>Reset Local Data</button><button onClick={() => exportBackup(db)}>Export Backup</button><label>Import Backup<input type="file" accept="application/json" onChange={(e) => importBackupFile(e.target.files?.[0], db, setDb)} /></label><p>Data stored on this device only.</p></section>}
   </div>;
 }
 
