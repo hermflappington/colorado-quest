@@ -1,83 +1,9 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// ─── Pull out testable pure functions by re-importing the module.
-// We expose them for testing by importing the compiled module internals
-// via a thin re-export shim (see below), but since App.jsx is a default-
-// export component we test pure logic directly through the compiled output.
-// Pure functions are extracted into a separate test-helpers import below.
-
 import App from './App.jsx';
-
-// ─── Helpers copied from App.jsx (pure functions, no side-effects) ───────────
-
-const CATEGORIES = [
-  'Rock / mineral', 'Landform', 'Historic place', 'No visible historic trace',
-  'Possible artifact', 'Rock art / petroglyph', 'Sacred or significant place',
-  'Fossil-looking object', 'Wildlife / track / ecology', 'Other discovery',
-];
-const SENSITIVE = new Set(['Possible artifact', 'Rock art / petroglyph', 'Sacred or significant place', 'Fossil-looking object']);
-const LEVELS = [
-  { name: 'Trail Starter', points: 0 },
-  { name: 'Moffat County Scout', points: 100 },
-  { name: 'Browns Park Tracker', points: 250 },
-  { name: 'Yampa River Explorer', points: 500 },
-  { name: 'Dinosaur Country Naturalist', points: 750 },
-  { name: 'Northwest Colorado Pathfinder', points: 1000 },
-  { name: 'Mountain Memory Keeper', points: 1500 },
-];
-const BADGES = [
-  { group: 'Northwest Colorado', name: 'Moffat County Scout', description: 'Log your first Colorado Quest discovery.', earned: (s) => s.entryCount >= 1 },
-  { group: 'Colorado', name: 'Northwest Colorado Pathfinder', description: 'Log five discoveries and three gratitude notes.', earned: (s) => s.entryCount >= 5 && s.gratitudeCount >= 3 },
-  { group: 'Colorado', name: 'Rocky Mountain Observer', description: 'Log ten total discoveries.', earned: (s) => s.entryCount >= 10 },
-  { group: 'Earth', name: 'Rock Cycle Rookie', description: 'Log your first rock or mineral discovery.', earned: (s) => s.categoryCounts['Rock / mineral'] >= 1 },
-  { group: 'Earth', name: 'Leave No Trace Hero', description: 'Log any sensitive discovery with care.', earned: (s) => s.sensitiveCount >= 1 },
-  { group: 'Earth', name: 'Gratitude Keeper', description: 'Add five gratitude notes.', earned: (s) => s.gratitudeCount >= 5 },
-  { group: 'Earth', name: 'Kind Explorer', description: 'Add ten gratitude notes or reach 200 quest points.', earned: (s) => s.gratitudeCount >= 10 || s.totalPoints >= 200 },
-];
-
-function badgePoints(badge) {
-  if (badge.name === 'Northwest Colorado Pathfinder' || badge.name === 'Kind Explorer') return 100;
-  if (badge.group === 'Northwest Colorado') return 50;
-  if (badge.group === 'Colorado') return 40;
-  return 25;
-}
-
-function entryPoints(entry) {
-  let pts = 10;
-  pts += (entry.photos?.length || 0) * 5;
-  if (entry.gratitude?.trim()) pts += 5;
-  if (SENSITIVE.has(entry.category)) pts += 10;
-  if (entry.category === 'No visible historic trace') pts += 10;
-  return pts;
-}
-
-function currentLevel(totalPoints) {
-  const level = [...LEVELS].reverse().find((l) => totalPoints >= l.points) || LEVELS[0];
-  const next = LEVELS.find((l) => l.points > totalPoints);
-  return { ...level, next };
-}
-
-function gameStats(entries) {
-  const locationText = entries.map((e) => e.generalLocationName || '').join(' ').toLowerCase();
-  const allText = entries.map((e) => [e.title, e.notes, e.gratitude, e.generalLocationName].filter(Boolean).join(' ')).join(' ').toLowerCase();
-  const basePoints = entries.reduce((sum, e) => sum + entryPoints(e), 0);
-  const photoCount = entries.reduce((sum, e) => sum + (e.photos?.length || 0), 0);
-  const gratitudeCount = entries.filter((e) => e.gratitude?.trim()).length;
-  const sensitiveCount = entries.filter((e) => SENSITIVE.has(e.category)).length;
-  const trailCount = entries.filter((e) => e.landAccess === 'trail/roadside').length;
-  const publicLandCount = entries.filter((e) => e.landAccess === 'public land').length;
-  const irishCanyonQuietCount = entries.filter((e) => (e.generalLocationName || '').toLowerCase().includes('irish canyon') && e.category === 'No visible historic trace').length;
-  const categoryCounts = Object.fromEntries(CATEGORIES.map((c) => [c, 0]));
-  entries.forEach((e) => { if (e.category in categoryCounts) categoryCounts[e.category]++; });
-  const earthCount = (categoryCounts['Rock / mineral'] || 0) + (categoryCounts.Landform || 0) + (categoryCounts['Fossil-looking object'] || 0);
-  const stats = { entryCount: entries.length, gratitudeCount, locationText, allText, totalPoints: basePoints, basePoints, photoCount, sensitiveCount, trailCount, publicLandCount, irishCanyonQuietCount, categoryCounts, earthCount };
-  const badges = BADGES.map((b) => ({ ...b, points: badgePoints(b), isEarned: b.earned(stats) }));
-  const badgeBonusPoints = badges.filter((b) => b.isEarned).reduce((sum, b) => sum + b.points, 0);
-  const totalPoints = basePoints + badgeBonusPoints;
-  return { ...stats, totalPoints, badgeBonusPoints, level: currentLevel(totalPoints), badges };
-}
+import { entryPoints, currentLevel, gameStats, pickAdventureCategories, normalizeEntry, CATEGORIES } from './game.js';
 
 function makeEntry(overrides = {}) {
   return {
@@ -99,8 +25,6 @@ function makeEntry(overrides = {}) {
   };
 }
 
-// ─── Mock setup ───────────────────────────────────────────────────────────────
-
 beforeEach(() => {
   localStorage.clear();
   vi.restoreAllMocks();
@@ -118,7 +42,7 @@ vi.mock('leaflet', () => ({
   default: { Icon: class { constructor(o) { Object.assign(this, o); } } },
 }));
 
-// ─── gameStats: points ────────────────────────────────────────────────────────
+// ─── entryPoints ──────────────────────────────────────────────────────────────
 
 describe('entryPoints', () => {
   it('awards base 10 points', () => {
@@ -146,7 +70,7 @@ describe('entryPoints', () => {
   });
 });
 
-// ─── gameStats: levels ────────────────────────────────────────────────────────
+// ─── currentLevel ─────────────────────────────────────────────────────────────
 
 describe('currentLevel', () => {
   it('starts at Trail Starter', () => {
@@ -166,7 +90,7 @@ describe('currentLevel', () => {
   });
 });
 
-// ─── gameStats: badges ────────────────────────────────────────────────────────
+// ─── gameStats badges ─────────────────────────────────────────────────────────
 
 describe('gameStats badges', () => {
   it('earns Moffat County Scout on first entry', () => {
@@ -198,8 +122,35 @@ describe('gameStats badges', () => {
   });
 });
 
-// ─── load() validation ────────────────────────────────────────────────────────
-// We test these by rendering App with pre-seeded localStorage.
+// ─── pickAdventureCategories ──────────────────────────────────────────────────
+
+describe('pickAdventureCategories', () => {
+  it('returns 5 distinct real categories', () => {
+    const picked = pickAdventureCategories();
+    expect(picked).toHaveLength(5);
+    expect(new Set(picked).size).toBe(5);
+    picked.forEach((c) => expect(CATEGORIES).toContain(c));
+  });
+});
+
+// ─── normalizeEntry ───────────────────────────────────────────────────────────
+
+describe('normalizeEntry', () => {
+  it('repairs missing photos and profileIds arrays', () => {
+    const fixed = normalizeEntry({ id: 'x', title: 'old backup entry' });
+    expect(fixed.photos).toEqual([]);
+    expect(fixed.profileIds).toEqual([]);
+  });
+
+  it('leaves valid arrays untouched', () => {
+    const entry = makeEntry({ photos: ['a'], profileIds: ['p1', 'p2'] });
+    const fixed = normalizeEntry(entry);
+    expect(fixed.photos).toEqual(['a']);
+    expect(fixed.profileIds).toEqual(['p1', 'p2']);
+  });
+});
+
+// ─── load() validation (via App render with seeded localStorage) ─────────────
 
 describe('load() validation', () => {
   it('falls back to first profile if activeProfileId is dangling', async () => {
@@ -211,7 +162,6 @@ describe('load() validation', () => {
       activeAdventure: null,
     }));
     render(<App />);
-    // The profile select should show "Tester" as selected (not crash)
     const select = await screen.findByRole('combobox', { name: /active profile/i });
     expect(select.value).toBe('real-id');
   });
@@ -230,7 +180,6 @@ describe('load() validation', () => {
       },
     }));
     render(<App />);
-    // App should show "Ready for an adventure?" not the active find-list
     expect(await screen.findByText(/ready for an adventure/i)).toBeInTheDocument();
   });
 
@@ -244,6 +193,21 @@ describe('load() validation', () => {
     }));
     render(<App />);
     expect(await screen.findByText(/ready for an adventure/i)).toBeInTheDocument();
+  });
+
+  it('renders Entry Detail for an entry missing photos/profileIds arrays', async () => {
+    const user = userEvent.setup();
+    localStorage.setItem('coquest.v1', JSON.stringify({
+      safetyAck: true,
+      profiles: [{ id: 'p1', name: 'Tester', role: 'adult' }],
+      activeProfileId: 'p1',
+      entries: [{ id: 'e1', title: 'Legacy entry', category: 'Landform', lat: 40, lng: -108, createdAt: 1, confidence: 'Low', status: 'New', landAccess: 'unknown' }],
+      activeAdventure: null,
+    }));
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /^Journal$/i }));
+    await user.click(screen.getByRole('button', { name: /legacy entry/i }));
+    expect(await screen.findByRole('heading', { name: /legacy entry/i })).toBeInTheDocument();
   });
 });
 
@@ -289,15 +253,13 @@ describe('New Discovery save button', () => {
   it('enables Save Discovery once all required fields are present', async () => {
     const user = await renderToNewDiscovery();
 
-    // Check a profile
     await user.click(screen.getByRole('checkbox'));
 
-    // Fake a GPS capture via geolocation mock
     const mockGeo = { getCurrentPosition: vi.fn((success) => success({ coords: { latitude: 40.1, longitude: -108.2 } })) };
     Object.defineProperty(navigator, 'geolocation', { value: mockGeo, configurable: true });
     await user.click(screen.getByRole('button', { name: /capture gps/i }));
 
-    // Fake a photo upload (canvas/Image stubs are in test-setup.js)
+    // Canvas/Image stubs for processPhoto live in test-setup.js
     const file = new File(['img'], 'photo.jpg', { type: 'image/jpeg' });
     const input = screen.getByLabelText(/photos/i);
     await user.upload(input, file);
@@ -306,9 +268,18 @@ describe('New Discovery save button', () => {
       expect(screen.getByRole('button', { name: /save discovery/i })).not.toBeDisabled();
     });
   });
+
+  it('allows removing a photo before saving', async () => {
+    const user = await renderToNewDiscovery();
+    const file = new File(['img'], 'photo.jpg', { type: 'image/jpeg' });
+    await user.upload(screen.getByLabelText(/photos/i), file);
+    const remove = await screen.findByRole('button', { name: /^remove$/i });
+    await user.click(remove);
+    expect(screen.queryByRole('button', { name: /^remove$/i })).not.toBeInTheDocument();
+  });
 });
 
-// ─── Adventure mode: check-off and completion ─────────────────────────────────
+// ─── Adventure mode ───────────────────────────────────────────────────────────
 
 describe('adventure mode', () => {
   beforeEach(() => {
@@ -330,8 +301,7 @@ describe('adventure mode', () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(await screen.findByRole('button', { name: /start new adventure/i }));
-    const items = screen.getAllByRole('button', { name: /found it/i });
-    expect(items).toHaveLength(5);
+    expect(screen.getAllByRole('button', { name: /found it/i })).toHaveLength(5);
   });
 
   it('checking off all items shows completion message', async () => {
@@ -352,6 +322,82 @@ describe('adventure mode', () => {
   });
 });
 
+// ─── GPS reveal hold: keyboard auto-repeat must not defeat the 2s gate ────────
+
+describe('sensitive GPS reveal hold', () => {
+  async function renderToSensitiveDetail() {
+    const user = userEvent.setup();
+    localStorage.setItem('coquest.v1', JSON.stringify({
+      safetyAck: true,
+      profiles: [{ id: 'p1', name: 'Tester', role: 'adult' }],
+      activeProfileId: 'p1',
+      entries: [makeEntry({ id: 'e1', title: 'Sensitive find', category: 'Possible artifact', lat: 40.12345, lng: -108.54321 })],
+      activeAdventure: null,
+    }));
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /^Journal$/i }));
+    await user.click(screen.getByRole('button', { name: /sensitive find/i }));
+    return user;
+  }
+
+  it('hides GPS behind hold button for sensitive category', async () => {
+    await renderToSensitiveDetail();
+    expect(screen.getByText(/exact gps hidden/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /hold 2s to reveal/i })).toBeInTheDocument();
+  });
+
+  it('a short key tap does NOT reveal GPS after release (no orphaned timers)', async () => {
+    // Navigate under real timers (findByRole polls with real timers),
+    // then fake timers only around the hold interaction itself.
+    await renderToSensitiveDetail();
+    const holdBtn = screen.getByRole('button', { name: /hold 2s to reveal/i });
+    vi.useFakeTimers();
+    try {
+      // Simulate key auto-repeat: initial press + repeated keydowns, release before 2s.
+      fireEvent.keyDown(holdBtn, { key: ' ', repeat: false });
+      fireEvent.keyDown(holdBtn, { key: ' ', repeat: true });
+      fireEvent.keyDown(holdBtn, { key: ' ', repeat: true });
+      act(() => { vi.advanceTimersByTime(500); });
+      fireEvent.keyUp(holdBtn, { key: ' ' });
+      act(() => { vi.advanceTimersByTime(5000); });
+
+      expect(screen.getByText(/exact gps hidden/i)).toBeInTheDocument();
+      expect(screen.queryByText(/40\.12345/)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a full 2s hold reveals GPS', async () => {
+    await renderToSensitiveDetail();
+    const holdBtn = screen.getByRole('button', { name: /hold 2s to reveal/i });
+    vi.useFakeTimers();
+    try {
+      fireEvent.mouseDown(holdBtn);
+      act(() => { vi.advanceTimersByTime(2100); });
+      expect(screen.getByText(/40\.12345/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('kid profile cannot reveal at all', async () => {
+    const user = userEvent.setup();
+    localStorage.setItem('coquest.v1', JSON.stringify({
+      safetyAck: true,
+      profiles: [{ id: 'p1', name: 'Kiddo', role: 'kid' }],
+      activeProfileId: 'p1',
+      entries: [makeEntry({ id: 'e1', title: 'Sensitive find', category: 'Possible artifact' })],
+      activeAdventure: null,
+    }));
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /^Journal$/i }));
+    await user.click(screen.getByRole('button', { name: /sensitive find/i }));
+    expect(screen.getByText(/active profile is kid/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /hold 2s to reveal/i })).not.toBeInTheDocument();
+  });
+});
+
 // ─── Settings: Reset Local Data confirm gate ──────────────────────────────────
 
 describe('Reset Local Data', () => {
@@ -368,7 +414,6 @@ describe('Reset Local Data', () => {
     render(<App />);
     await user.click(await screen.findByRole('button', { name: /settings/i }));
     await user.click(screen.getByRole('button', { name: /reset local data/i }));
-    // Data should still be in localStorage
     const saved = JSON.parse(localStorage.getItem('coquest.v1') || '{}');
     expect(saved.entries?.length).toBe(1);
   });
@@ -386,7 +431,6 @@ describe('Reset Local Data', () => {
     render(<App />);
     await user.click(await screen.findByRole('button', { name: /settings/i }));
     await user.click(screen.getByRole('button', { name: /reset local data/i }));
-    // Safety gate should reappear
     expect(await screen.findByText(/Colorado Quest Safety/i)).toBeInTheDocument();
   });
 });

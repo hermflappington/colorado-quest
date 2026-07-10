@@ -3,6 +3,7 @@ body { margin: 0; background: #f4f7f2; }
 .shell { max-width: 900px; margin: 0 auto; padding: 1rem; }
 header h1 { margin: 0 0 .5rem; }
 nav { display:flex; flex-wrap:wrap; gap:.4rem; }
+nav button[aria-current="page"] { background:#1a3d2f; color:#fff; border-color:#1a3d2f; }
 button { padding:.5rem .7rem; border-radius:.6rem; border:1px solid #567; background:#fff; }
 section { background: #fff; border-radius: 12px; padding: 1rem; margin-top: .8rem; }
 label, fieldset { display:block; margin:.6rem 0; }
