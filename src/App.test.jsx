@@ -501,6 +501,89 @@ describe('sensitive GPS reveal hold', () => {
   });
 });
 
+// ─── Field guide cards ────────────────────────────────────────────────────────
+
+describe('field guide', () => {
+  beforeEach(() => {
+    localStorage.setItem('coquest.v1', JSON.stringify({
+      safetyAck: true,
+      profiles: [{ id: 'p1', name: 'Tester', role: 'adult' }],
+      activeProfileId: 'p1',
+      entries: [makeEntry({ id: 'e1', title: 'A neat rock', category: 'Rock / mineral' })],
+      activeAdventure: null,
+    }));
+  });
+
+  it('shows a learn card on New Discovery matching the selected category', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /^New Discovery$/i }));
+    expect(screen.getByText(/learn about this/i)).toBeInTheDocument();
+    expect(screen.getByText(/morrison formation/i)).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText(/category/i), 'Rock art / petroglyph');
+    expect(screen.getByText(/petroglyphs are pecked or carved/i)).toBeInTheDocument();
+  });
+
+  it('shows the learn card on Entry Detail', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /^Journal$/i }));
+    await user.click(screen.getByRole('button', { name: /a neat rock/i }));
+    expect(screen.getByText(/learn about this/i)).toBeInTheDocument();
+  });
+});
+
+// ─── Yearbook ─────────────────────────────────────────────────────────────────
+
+describe('yearbook', () => {
+  it('filters entries by year and keeps sensitive locations private', async () => {
+    const user = userEvent.setup();
+    const y2025 = new Date('2025-06-15T12:00:00').getTime();
+    const y2026 = new Date('2026-07-04T12:00:00').getTime();
+    localStorage.setItem('coquest.v1', JSON.stringify({
+      safetyAck: true,
+      profiles: [{ id: 'p1', name: 'Tester', role: 'adult' }],
+      activeProfileId: 'p1',
+      entries: [
+        makeEntry({ id: 'e1', title: 'Old year find', createdAt: y2025 }),
+        makeEntry({ id: 'e2', title: 'Secret artifact spot', category: 'Possible artifact', createdAt: y2026, lat: 40.12345, lng: -108.54321 }),
+      ],
+      activeAdventure: null,
+    }));
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /^Yearbook$/i }));
+
+    // All years: both entries, cover stats
+    expect(screen.getByText(/old year find/i)).toBeInTheDocument();
+    expect(screen.getByText(/secret artifact spot/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 discoveries/i)).toBeInTheDocument();
+
+    // Sensitive entry never prints exact GPS
+    expect(screen.getByText(/exact location kept private/i)).toBeInTheDocument();
+    expect(screen.queryByText(/40\.12345/)).not.toBeInTheDocument();
+
+    // Filter to 2025 only
+    await user.selectOptions(screen.getByLabelText(/year/i), '2025');
+    expect(screen.getByText(/old year find/i)).toBeInTheDocument();
+    expect(screen.queryByText(/secret artifact spot/i)).not.toBeInTheDocument();
+  });
+
+  it('shows an empty state and disables print with no entries', async () => {
+    const user = userEvent.setup();
+    localStorage.setItem('coquest.v1', JSON.stringify({
+      safetyAck: true,
+      profiles: [{ id: 'p1', name: 'Tester', role: 'adult' }],
+      activeProfileId: 'p1',
+      entries: [],
+      activeAdventure: null,
+    }));
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /^Yearbook$/i }));
+    expect(screen.getByText(/no discoveries/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /print/i })).toBeDisabled();
+  });
+});
+
 // ─── Settings: Reset Local Data confirm gate ──────────────────────────────────
 
 describe('Reset Local Data', () => {

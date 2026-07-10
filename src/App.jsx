@@ -9,6 +9,7 @@ import {
 import {
   LEGACY_STORAGE_KEY, clearState, loadState, readLegacyLocalStorage, requestPersistence, saveState,
 } from './storage.js';
+import { FIELD_GUIDE } from './fieldGuide.js';
 
 const BACKUP_NUDGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
@@ -59,7 +60,7 @@ async function processPhotos(files) {
 }
 
 const initialForm = {
-  title: '', notes: '', category: CATEGORIES[0], profileIds: [], photos: [], lat: '', lng: '',
+  title: '', notes: '', category: CATEGORIES[0], profileIds: [], photos: [], audioNotes: [], lat: '', lng: '',
   confidence: CONFIDENCE[0], status: STATUS[0], generalLocationName: '', landAccess: LAND_ACCESS[2], gratitude: '',
 };
 
@@ -191,6 +192,13 @@ export default function App() {
   const activeProfile = db?.profiles.find((p) => p.id === db.activeProfileId);
   const selected = useMemo(() => entries.find((e) => e.id === selectedId) ?? null, [entries, selectedId]);
 
+  const [yearbookYear, setYearbookYear] = useState('all');
+  const yearbookYears = useMemo(() => [...new Set(entries.map((e) => new Date(e.createdAt).getFullYear()))].sort(), [entries]);
+  const yearbookEntries = useMemo(() => {
+    const filtered = yearbookYear === 'all' ? entries : entries.filter((e) => new Date(e.createdAt).getFullYear() === Number(yearbookYear));
+    return [...filtered].sort((a, b) => a.createdAt - b.createdAt);
+  }, [entries, yearbookYear]);
+
   const addProfile = (name, role) => setDb((d) => ({ ...d, profiles: [...d.profiles, { id: crypto.randomUUID(), name, role }] }));
 
   const canSave = !!form.category && form.profileIds.length > 0 && form.photos.length > 0 && form.lat && form.lng;
@@ -265,6 +273,37 @@ export default function App() {
     setEditForm((f) => ({ ...f, photos: [...f.photos, ...next] }));
   };
 
+  // Voice notes: MediaRecorder → base64 data URL stored on the entry.
+  const [recording, setRecording] = useState(false);
+  const recorderRef = useRef(null);
+  const canRecord = !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined';
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks = [];
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+        const reader = new FileReader();
+        reader.onload = () => setForm((f) => ({ ...f, audioNotes: [...f.audioNotes, reader.result] }));
+        reader.readAsDataURL(blob);
+      };
+      recorder.start();
+      recorderRef.current = recorder;
+      setRecording(true);
+    } catch {
+      alert('Microphone unavailable. Please check permissions.');
+    }
+  };
+  const stopRecording = () => {
+    recorderRef.current?.stop();
+    recorderRef.current = null;
+    setRecording(false);
+  };
+  useEffect(() => () => { recorderRef.current?.stop(); }, []);
+
   const canRevealSensitive = activeProfile?.role === 'adult';
   const beginRevealHold = (id) => {
     // The holdTimer guard also absorbs keyboard auto-repeat: without it, each
@@ -297,7 +336,7 @@ export default function App() {
           {db.profiles.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.role})</option>)}
         </select>
       </label>
-      <nav>{['Home', 'New Discovery', 'Journal', 'Badges', 'Map', 'Profiles', 'Settings'].map((s) => <button key={s} aria-current={screen === s ? 'page' : undefined} onClick={() => setScreen(s)}>{s}</button>)}</nav>
+      <nav>{['Home', 'New Discovery', 'Journal', 'Badges', 'Map', 'Yearbook', 'Profiles', 'Settings'].map((s) => <button key={s} aria-current={screen === s ? 'page' : undefined} onClick={() => setScreen(s)}>{s}</button>)}</nav>
     </header>
 
     {screen === 'Home' && <section><h2>Colorado Quest Progress</h2>
@@ -368,9 +407,20 @@ export default function App() {
       <label>Category<select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></label>
       {form.category === 'No visible historic trace' && <p className="quiet-note">Quiet observation counts. You can earn points for noticing a place respectfully, even when you do not find obvious history.</p>}
       {SENSITIVE.has(form.category) && <p className="warning">Do not disturb, collect, touch, dig, or publicize this location. Exact GPS will stay private.</p>}
+      <FieldGuideCard category={form.category} />
       <fieldset><legend>People credited (required)</legend>{db.profiles.map((p) => <label key={p.id}><input type="checkbox" checked={form.profileIds.includes(p.id)} onChange={(e) => setForm((f) => ({ ...f, profileIds: e.target.checked ? [...f.profileIds, p.id] : f.profileIds.filter((id) => id !== p.id) }))} />{p.name} ({p.role})</label>)}</fieldset>
+      <label>Take a photo (camera)<input type="file" accept="image/*" capture="environment" onChange={(e) => { onPhoto(e.target.files); e.target.value = ''; }} /></label>
       <label>Photos (required)<input type="file" accept="image/*" multiple onChange={(e) => { onPhoto(e.target.files); e.target.value = ''; }} /></label>
       <div className="photos">{form.photos.map((p, i) => <div className="photo-edit" key={`${p.slice(0, 24)}-${i}`}><img src={p} alt={`Discovery photo ${i + 1}`} /><button onClick={() => setForm((f) => ({ ...f, photos: f.photos.filter((_, index) => index !== i) }))}>Remove</button></div>)}</div>
+      {canRecord && <div className="voice-notes">
+        {recording
+          ? <button className="recording" onClick={stopRecording}><span aria-hidden="true">⏹</span> Stop Recording</button>
+          : <button onClick={startRecording}><span aria-hidden="true">🎤</span> Record Voice Note</button>}
+        {form.audioNotes.map((a, i) => <div className="voice-note" key={i}>
+          <audio controls src={a} />
+          <button onClick={() => setForm((f) => ({ ...f, audioNotes: f.audioNotes.filter((_, index) => index !== i) }))}>Remove</button>
+        </div>)}
+      </div>}
       <button onClick={captureGps}>Capture GPS</button>
       <p>{form.lat && form.lng ? formatGps(Number(form.lat), Number(form.lng)) : 'No GPS yet (required)'}</p>
       <details>
@@ -389,7 +439,8 @@ export default function App() {
 
     {screen === 'Journal' && <section><h2>Journal</h2>{sortedEntries.map((e) => <article key={e.id}><button onClick={() => { setSelectedId(e.id); setScreen('Entry Detail'); }}>{new Date(e.createdAt).toLocaleString()} - {e.title} ({entryPoints(e)} pts)</button></article>)}</section>}
 
-    {screen === 'Entry Detail' && selected && <section><h2>{selected.title}</h2><p>{selected.category}</p><p>Quest points: {entryPoints(selected)}</p><p>General location: {selected.generalLocationName || 'Not set'}</p><p>Confidence: {selected.confidence}</p><p>Status: {selected.status}</p><p>Land access: {selected.landAccess}</p><p>{selected.notes || 'No notes.'}</p><p>Gratitude: {selected.gratitude || 'Not added yet.'}</p><p>Credits: {selected.profileIds.map((id) => db.profiles.find((p) => p.id === id)?.name).filter(Boolean).join(', ') || 'None'}</p><div className="photos">{selected.photos.map((p, i) => <img key={i} src={p} alt={`Photo ${i + 1} for ${selected.title}`} />)}</div>
+    {screen === 'Entry Detail' && selected && <section><h2>{selected.title}</h2><p>{selected.category}</p><FieldGuideCard category={selected.category} /><p>Quest points: {entryPoints(selected)}</p><p>General location: {selected.generalLocationName || 'Not set'}</p><p>Confidence: {selected.confidence}</p><p>Status: {selected.status}</p><p>Land access: {selected.landAccess}</p><p>{selected.notes || 'No notes.'}</p><p>Gratitude: {selected.gratitude || 'Not added yet.'}</p><p>Credits: {selected.profileIds.map((id) => db.profiles.find((p) => p.id === id)?.name).filter(Boolean).join(', ') || 'None'}</p><div className="photos">{selected.photos.map((p, i) => <img key={i} src={p} alt={`Photo ${i + 1} for ${selected.title}`} />)}</div>
+      {(selected.audioNotes || []).length > 0 && <div className="voice-notes">{selected.audioNotes.map((a, i) => <div className="voice-note" key={i}><audio controls src={a} /></div>)}</div>}
       {SENSITIVE.has(selected.category) && !revealed[selected.id] ? <div><p>Exact GPS hidden (sensitive category).</p>{canRevealSensitive ? <button onMouseDown={() => beginRevealHold(selected.id)} onMouseUp={cancelRevealHold} onMouseLeave={cancelRevealHold} onTouchStart={() => beginRevealHold(selected.id)} onTouchEnd={cancelRevealHold} onTouchCancel={cancelRevealHold} onKeyDown={(e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); beginRevealHold(selected.id); } }} onKeyUp={(e) => { if (e.key === ' ' || e.key === 'Enter') cancelRevealHold(); }} onBlur={cancelRevealHold}>Hold 2s to reveal (adult only)</button> : <p>Active profile is kid; only approximate location is visible.</p>}</div> : <p>GPS: {formatGps(selected.lat, selected.lng)}</p>}
       <div className="actions">
         <button onClick={() => startEditEntry(selected)}>Edit Entry</button>
@@ -424,8 +475,48 @@ export default function App() {
 
     {screen === 'Map' && <section><h2>Map</h2><MapContainer center={[39.7392, -104.9903]} zoom={8} style={{ height: '55vh' }}><TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />{db.entries.map((e) => {const hidden = SENSITIVE.has(e.category); const lat = hidden ? Math.round(e.lat * 100) / 100 : e.lat; const lng = hidden ? Math.round(e.lng * 100) / 100 : e.lng; return <Marker key={e.id} position={[lat, lng]} icon={icon}><Popup><strong>{e.title}</strong><br />{e.category}<br />{hidden ? 'Approximate location shown' : formatGps(e.lat, e.lng)}</Popup></Marker>;})}</MapContainer></section>}
 
+    {screen === 'Yearbook' && <section className="yearbook">
+      <h2 className="no-print">Yearbook</h2>
+      <div className="no-print yearbook-controls">
+        <label>Year
+          <select value={yearbookYear} onChange={(e) => setYearbookYear(e.target.value)}>
+            <option value="all">All years</option>
+            {yearbookYears.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </label>
+        <button className="cta" onClick={() => window.print()} disabled={yearbookEntries.length === 0}>Print / Save as PDF</button>
+        <p>In the print dialog, choose “Save as PDF” to make a keepsake book of your discoveries.</p>
+      </div>
+      {yearbookEntries.length === 0 ? <p>No discoveries {yearbookYear === 'all' ? 'yet' : `in ${yearbookYear}`}. Get out there!</p> : <>
+        <div className="yearbook-cover">
+          <h1>Colorado Quest</h1>
+          <p className="yearbook-subtitle">{yearbookYear === 'all' ? 'Our Discoveries' : `Our ${yearbookYear} Discoveries`}</p>
+          <p>{yearbookEntries.length} discoveries · {yearbookEntries.reduce((n, e) => n + e.photos.length, 0)} photos · {yearbookEntries.filter((e) => e.gratitude?.trim()).length} gratitude notes</p>
+        </div>
+        {yearbookEntries.map((e) => <article className="yearbook-entry" key={e.id}>
+          <h3>{e.title}</h3>
+          <p className="yearbook-meta">{new Date(e.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })} · {e.category}{e.generalLocationName ? ` · ${e.generalLocationName}` : ''}</p>
+          {e.notes && <p>{e.notes}</p>}
+          {e.gratitude?.trim() && <p className="yearbook-gratitude">Thankful for: {e.gratitude}</p>}
+          <p className="yearbook-meta">Found by: {e.profileIds.map((id) => db.profiles.find((p) => p.id === id)?.name).filter(Boolean).join(', ') || 'Us'}{SENSITIVE.has(e.category) ? ' · Exact location kept private' : (typeof e.lat === 'number' && e.lat ? ` · ${formatGps(e.lat, e.lng)}` : '')}{(e.audioNotes || []).length > 0 ? ` · ${e.audioNotes.length} voice note${e.audioNotes.length > 1 ? 's' : ''} recorded` : ''}</p>
+          <div className="photos">{e.photos.map((p, i) => <img key={i} src={p} alt={`Photo ${i + 1} for ${e.title}`} />)}</div>
+        </article>)}
+      </>}
+    </section>}
+
     {screen === 'Settings' && <section><h2>Settings</h2><p className="warning">Your journal lives only on this device. Export backups regularly and keep them somewhere safe.</p><button onClick={() => { if (!window.confirm('Delete all local data? This cannot be undone.')) return; clearState().catch(() => {}); localStorage.removeItem(LEGACY_STORAGE_KEY); setDb(blank); }}>Reset Local Data</button><button onClick={doExportBackup}>Export Backup</button><label>Import Backup<input type="file" accept="application/json" onChange={(e) => importBackupFile(e.target.files?.[0], db, setDb)} /></label><p>{db.lastBackupAt ? `Last backup: ${new Date(db.lastBackupAt).toLocaleDateString()}` : 'No backup exported yet.'}</p></section>}
   </div>;
+}
+
+function FieldGuideCard({ category }) {
+  const guide = FIELD_GUIDE[category];
+  if (!guide) return null;
+  return <details className="field-guide">
+    <summary>Learn about this <span aria-hidden="true">🔎</span></summary>
+    <ul>{guide.facts.map((fact, i) => <li key={i}>{fact}</li>)}</ul>
+    <p className="guide-respect"><strong>How to be respectful:</strong> {guide.respect}</p>
+    <p className="guide-wonder"><strong>Wonder:</strong> {guide.wonder}</p>
+  </details>;
 }
 
 function QuestForm({ addQuest }) {

@@ -45,3 +45,34 @@ input, textarea, select { width:100%; padding:.45rem; margin-top:.2rem; }
 details { margin:.8rem 0; border:1px solid #d4d9d1; border-radius:.5rem; padding:.4rem .6rem; background:#fafbf8; }
 details summary { cursor:pointer; font-weight:700; padding:.3rem 0; }
 button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid #1a3d2f; outline-offset: 2px; }
+
+.field-guide { background:#f0f6ff; border-color:#b9d2f0; }
+.field-guide ul { margin:.4rem 0; padding-left:1.2rem; }
+.field-guide li { margin:.35rem 0; }
+.guide-respect { background:#eef5ea; border-radius:.4rem; padding:.5rem; }
+.guide-wonder { background:#fff9e8; border-radius:.4rem; padding:.5rem; }
+
+.voice-notes { margin:.6rem 0; }
+.voice-note { display:flex; align-items:center; gap:.5rem; margin:.4rem 0; }
+.voice-note audio { flex:1; min-width:0; }
+button.recording { background:#c0392b; color:#fff; border-color:#c0392b; }
+
+.yearbook-controls { display:flex; flex-wrap:wrap; align-items:end; gap:.8rem; }
+.yearbook-controls label { flex:1; min-width:140px; }
+.yearbook-cover { text-align:center; padding:2rem 1rem; border:2px solid #1a3d2f; border-radius:.6rem; margin:.8rem 0; background:#f7faf4; }
+.yearbook-cover h1 { margin:.2rem 0; color:#1a3d2f; }
+.yearbook-subtitle { font-size:1.2rem; font-weight:700; }
+.yearbook-entry { border-bottom:1px solid #d4d9d1; padding:.8rem 0; }
+.yearbook-entry h3 { margin:.2rem 0; color:#1a3d2f; }
+.yearbook-meta { font-size:.9rem; color:#425447; margin:.25rem 0; }
+.yearbook-gratitude { font-style:italic; }
+
+@media print {
+  header, .no-print { display:none !important; }
+  body { background:#fff; }
+  .shell { max-width:none; padding:0; }
+  section { box-shadow:none; border-radius:0; padding:0; margin:0; }
+  .yearbook-cover { border:none; page-break-after:always; padding-top:35vh; }
+  .yearbook-entry { page-break-inside:avoid; break-inside:avoid; }
+  .photos img { height:150px; }
+}

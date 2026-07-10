@@ -305,6 +305,7 @@ export function normalizeEntry(entry) {
   return {
     ...entry,
     photos: Array.isArray(entry.photos) ? entry.photos : [],
+    audioNotes: Array.isArray(entry.audioNotes) ? entry.audioNotes : [],
     profileIds: Array.isArray(entry.profileIds) ? entry.profileIds : [],
   };
 }
