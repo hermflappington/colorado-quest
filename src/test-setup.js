@@ -1,4 +1,12 @@
 import '@testing-library/jest-dom';
+import 'fake-indexeddb/auto';
+import { IDBFactory } from 'fake-indexeddb';
+import { beforeEach } from 'vitest';
+
+// Fresh IndexedDB per test so state never leaks between tests.
+beforeEach(() => {
+  globalThis.indexedDB = new IDBFactory();
+});
 
 // Make processPhoto (canvas re-encode) work in jsdom
 HTMLCanvasElement.prototype.getContext = () => ({ drawImage: () => {} });

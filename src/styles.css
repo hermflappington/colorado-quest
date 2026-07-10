@@ -36,6 +36,12 @@ input, textarea, select { width:100%; padding:.45rem; margin-top:.2rem; }
 .find-list li { display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding:.5rem; border-radius:.5rem; background:#fff; margin-bottom:.4rem; border:1px solid #cddfca; }
 .find-list li.found { opacity:.65; text-decoration:line-through; }
 .celebrate { font-size:1.1rem; font-weight:700; color:#1a3d2f; }
+.quest-list ul { list-style:none; padding:0; margin:.4rem 0; }
+.quest-list li { display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding:.45rem .5rem; border-radius:.5rem; background:#fff; margin-bottom:.35rem; border:1px solid #cddfca; }
+.quest-list h4 { margin:.8rem 0 .3rem; }
+.quest-actions { display:flex; gap:.35rem; }
+.quest-form { background:#fff; }
+.warning button { margin-left:.5rem; }
 details { margin:.8rem 0; border:1px solid #d4d9d1; border-radius:.5rem; padding:.4rem .6rem; background:#fafbf8; }
 details summary { cursor:pointer; font-weight:700; padding:.3rem 0; }
 button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid #1a3d2f; outline-offset: 2px; }

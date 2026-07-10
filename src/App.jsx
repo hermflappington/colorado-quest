@@ -6,8 +6,11 @@ import {
   CATEGORIES, SENSITIVE, CONFIDENCE, STATUS, LAND_ACCESS,
   autoTitle, formatGps, entryPoints, gameStats, normalizeEntry, pickAdventureCategories,
 } from './game.js';
+import {
+  LEGACY_STORAGE_KEY, clearState, loadState, readLegacyLocalStorage, requestPersistence, saveState,
+} from './storage.js';
 
-const STORAGE_KEY = 'coquest.v1';
+const BACKUP_NUDGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 const icon = new L.Icon({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
@@ -17,7 +20,7 @@ const icon = new L.Icon({
 });
 
 const starterAdult = { id: crypto.randomUUID(), name: 'Adult', role: 'adult' };
-const blank = { profiles: [starterAdult], activeProfileId: starterAdult.id, entries: [], safetyAck: false, activeAdventure: null };
+const blank = { profiles: [starterAdult], activeProfileId: starterAdult.id, entries: [], safetyAck: false, activeAdventure: null, savedQuests: [], lastBackupAt: null };
 
 // Re-encodes photo through canvas: strips EXIF (including GPS), resizes to max 1200px, compresses.
 // Resolves null if the browser cannot decode the file (e.g. HEIC on non-Safari, corrupt file).
@@ -65,20 +68,34 @@ function sanitizeDb(merged, fallbackProfileId) {
     merged.activeProfileId = merged.profiles[0]?.id ?? fallbackProfileId;
   }
   merged.entries = Array.isArray(merged.entries) ? merged.entries.map(normalizeEntry) : [];
+  merged.savedQuests = Array.isArray(merged.savedQuests) ? merged.savedQuests.filter((q) => q && typeof q.name === 'string' && Array.isArray(q.items) && q.items.length > 0) : [];
   const adv = merged.activeAdventure;
-  if (adv && (!Array.isArray(adv.categories) || !Array.isArray(adv.found) || adv.categories.some((c) => !CATEGORIES.includes(c)))) {
+  if (adv && Array.isArray(adv.categories) && !adv.items) {
+    // Pre-quest adventures stored the item list under `categories`.
+    adv.items = adv.categories;
+  }
+  if (adv && (!Array.isArray(adv.items) || adv.items.length === 0 || !Array.isArray(adv.found))) {
     merged.activeAdventure = null;
+  } else if (adv) {
+    adv.found = adv.found.filter((f) => adv.items.includes(f));
   }
   return merged;
 }
 
-function load() {
+// Loads from IndexedDB, falling back to (and migrating from) the legacy
+// localStorage copy. The legacy copy is left in place as a safety net.
+async function loadInitial() {
+  let saved = null;
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    return sanitizeDb({ ...blank, ...saved }, blank.activeProfileId);
-  } catch {
-    return blank;
+    saved = await loadState();
+  } catch { /* fall through to legacy */ }
+  const migrating = !saved;
+  if (!saved) saved = readLegacyLocalStorage();
+  const merged = sanitizeDb({ ...blank, ...(saved || {}) }, blank.activeProfileId);
+  if (migrating && saved) {
+    try { await saveState(merged); } catch { /* the save effect will retry */ }
   }
+  return merged;
 }
 
 function exportBackup(data) {
@@ -111,13 +128,13 @@ function importBackupFile(file, currentDb, setDb) {
 }
 
 export default function App() {
-  const [db, setDb] = useState(load);
+  const [db, setDb] = useState(null);
   const [screen, setScreen] = useState('Home');
   const [selectedId, setSelectedId] = useState(null);
   const [revealed, setRevealed] = useState({});
   const [form, setForm] = useState(initialForm);
   const [editForm, setEditForm] = useState(null);
-  const [storageFull, setStorageFull] = useState(false);
+  const [storageError, setStorageError] = useState(false);
 
   const saveTimer = useRef(null);
   const dbRef = useRef(db);
@@ -126,14 +143,19 @@ export default function App() {
   useEffect(() => { dbRef.current = db; }, [db]);
 
   useEffect(() => {
+    let cancelled = false;
+    loadInitial().then((loaded) => { if (!cancelled) setDb(loaded); });
+    requestPersistence();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!db) return;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
-        setStorageFull(false);
-      } catch {
-        setStorageFull(true);
-      }
+      saveState(db)
+        .then(() => setStorageError(false))
+        .catch(() => setStorageError(true));
     }, 300);
     return () => clearTimeout(saveTimer.current);
   }, [db]);
@@ -142,7 +164,7 @@ export default function App() {
     // beforeunload alone is unreliable on mobile Safari; pagehide/visibilitychange
     // cover the app being backgrounded on a phone, which is the common case here.
     const flush = () => {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dbRef.current)); } catch { /* quota; debounced path shows the warning */ }
+      if (dbRef.current) saveState(dbRef.current).catch(() => {});
     };
     const onVisibility = () => { if (document.visibilityState === 'hidden') flush(); };
     window.addEventListener('beforeunload', flush);
@@ -163,10 +185,11 @@ export default function App() {
     }
   }, [screen]);
 
-  const sortedEntries = useMemo(() => [...db.entries].sort((a, b) => b.createdAt - a.createdAt), [db.entries]);
-  const stats = useMemo(() => gameStats(db.entries), [db.entries]);
-  const activeProfile = db.profiles.find((p) => p.id === db.activeProfileId);
-  const selected = useMemo(() => db.entries.find((e) => e.id === selectedId) ?? null, [db.entries, selectedId]);
+  const entries = db?.entries ?? [];
+  const sortedEntries = useMemo(() => [...entries].sort((a, b) => b.createdAt - a.createdAt), [entries]);
+  const stats = useMemo(() => gameStats(entries), [entries]);
+  const activeProfile = db?.profiles.find((p) => p.id === db.activeProfileId);
+  const selected = useMemo(() => entries.find((e) => e.id === selectedId) ?? null, [entries, selectedId]);
 
   const addProfile = (name, role) => setDb((d) => ({ ...d, profiles: [...d.profiles, { id: crypto.randomUUID(), name, role }] }));
 
@@ -177,7 +200,7 @@ export default function App() {
     const entry = { ...form, id: crypto.randomUUID(), title, createdAt: Date.now(), lat: Number(form.lat), lng: Number(form.lng) };
     setDb((d) => {
       const adventure = d.activeAdventure;
-      const activeAdventure = adventure && adventure.categories.includes(entry.category) && !adventure.found.includes(entry.category)
+      const activeAdventure = adventure && adventure.items.includes(entry.category) && !adventure.found.includes(entry.category)
         ? { ...adventure, found: [...adventure.found, entry.category] }
         : adventure;
       return { ...d, entries: [entry, ...d.entries], activeAdventure };
@@ -186,13 +209,22 @@ export default function App() {
     setScreen('Journal');
   };
 
-  const startAdventure = () => setDb((d) => ({ ...d, activeAdventure: { id: crypto.randomUUID(), categories: pickAdventureCategories(), found: [], createdAt: Date.now() } }));
+  const startAdventure = () => setDb((d) => ({ ...d, activeAdventure: { id: crypto.randomUUID(), name: 'Find These 5 Things', items: pickAdventureCategories(), found: [], createdAt: Date.now() } }));
+  const startQuest = (quest) => setDb((d) => ({ ...d, activeAdventure: { id: crypto.randomUUID(), name: quest.name, questId: quest.id, items: [...quest.items], found: [], createdAt: Date.now() } }));
   const endAdventure = () => setDb((d) => ({ ...d, activeAdventure: null }));
-  const markFound = (category) => setDb((d) => {
+  const markFound = (item) => setDb((d) => {
     const adventure = d.activeAdventure;
-    if (!adventure || adventure.found.includes(category)) return d;
-    return { ...d, activeAdventure: { ...adventure, found: [...adventure.found, category] } };
+    if (!adventure || adventure.found.includes(item)) return d;
+    return { ...d, activeAdventure: { ...adventure, found: [...adventure.found, item] } };
   });
+  const addQuest = (name, items) => setDb((d) => ({ ...d, savedQuests: [...d.savedQuests, { id: crypto.randomUUID(), name, items, createdAt: Date.now() }] }));
+  const deleteQuest = (id) => setDb((d) => ({ ...d, savedQuests: d.savedQuests.filter((q) => q.id !== id) }));
+
+  const doExportBackup = () => {
+    exportBackup(db);
+    setDb((d) => ({ ...d, lastBackupAt: Date.now() }));
+  };
+  const backupDue = db && db.entries.length >= 3 && (!db.lastBackupAt || Date.now() - db.lastBackupAt > BACKUP_NUDGE_MS);
 
   const startEditEntry = (entry) => {
     setEditForm({
@@ -248,6 +280,10 @@ export default function App() {
     holdTimer.current = null;
   };
 
+  if (!db) {
+    return <div className="shell"><p>Loading your journal…</p></div>;
+  }
+
   if (!db.safetyAck) {
     return <div className="shell"><h1>Colorado Quest Safety</h1><p>Observe. Photograph. Document. Leave undisturbed.</p><ul><li>Do not collect.</li><li>Do not dig.</li><li>Do not touch rock art.</li><li>Do not disturb sites.</li><li>Do not trespass.</li><li>Do not publicize sensitive locations.</li></ul><p>Colorado Quest records observations and does not confirm archaeological, geological, fossil, historical, or cultural identification.</p><button onClick={() => setDb((d) => ({ ...d, safetyAck: true }))}>I Acknowledge</button></div>;
   }
@@ -255,7 +291,7 @@ export default function App() {
   return <div className="shell">
     <header>
       <h1>Colorado Quest</h1>
-      {storageFull && <p className="warning">Device storage is full — recent changes are NOT being saved. Export a backup now, then delete old photos or entries.</p>}
+      {storageError && <p className="warning">Saving failed — recent changes may NOT be stored. Export a backup now, then free up device storage.</p>}
       <label>Active profile
         <select value={db.activeProfileId} onChange={(e) => setDb((d) => ({ ...d, activeProfileId: e.target.value }))}>
           {db.profiles.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.role})</option>)}
@@ -265,11 +301,12 @@ export default function App() {
     </header>
 
     {screen === 'Home' && <section><h2>Colorado Quest Progress</h2>
+      {backupDue && <p className="warning">It has been a while since your last backup. Your journal lives only on this device. <button onClick={doExportBackup}>Export Backup Now</button></p>}
       <div className="adventure-card">
         {db.activeAdventure ? <>
-          <h3>Find These 5 Things</h3>
+          <h3>{db.activeAdventure.name || 'Find These 5 Things'}</h3>
           <ul className="find-list">
-            {db.activeAdventure.categories.map((c) => {
+            {db.activeAdventure.items.map((c) => {
               const found = db.activeAdventure.found.includes(c);
               return <li key={c} className={found ? 'found' : ''}>
                 <span><span aria-hidden="true">{found ? '✅' : '🔍'}</span> {c}</span>
@@ -277,13 +314,26 @@ export default function App() {
               </li>;
             })}
           </ul>
-          {db.activeAdventure.found.length === db.activeAdventure.categories.length
+          {db.activeAdventure.found.length === db.activeAdventure.items.length
             ? <><p className="celebrate"><span aria-hidden="true">🎉</span> Adventure complete! Great job!</p><button className="cta" onClick={startAdventure}>Start a New Adventure</button></>
             : <button onClick={endAdventure}>End Adventure</button>}
         </> : <>
           <h3>Ready for an adventure?</h3>
           <p>Roll 5 things to find on your next hike or outing.</p>
           <button className="cta" onClick={startAdventure}>Start New Adventure</button>
+          {db.savedQuests.length > 0 && <div className="quest-list">
+            <h4>Or start a saved quest</h4>
+            <ul>
+              {db.savedQuests.map((q) => <li key={q.id}>
+                <span>{q.name} ({q.items.length} things)</span>
+                <span className="quest-actions">
+                  <button onClick={() => startQuest(q)}>Start</button>
+                  {activeProfile?.role === 'adult' && <button onClick={() => { if (window.confirm(`Delete quest "${q.name}"?`)) deleteQuest(q.id); }}>Delete</button>}
+                </span>
+              </li>)}
+            </ul>
+          </div>}
+          {activeProfile?.role === 'adult' && <QuestForm addQuest={addQuest} />}
         </>}
       </div>
       <div className="level-card">
@@ -374,8 +424,22 @@ export default function App() {
 
     {screen === 'Map' && <section><h2>Map</h2><MapContainer center={[39.7392, -104.9903]} zoom={8} style={{ height: '55vh' }}><TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />{db.entries.map((e) => {const hidden = SENSITIVE.has(e.category); const lat = hidden ? Math.round(e.lat * 100) / 100 : e.lat; const lng = hidden ? Math.round(e.lng * 100) / 100 : e.lng; return <Marker key={e.id} position={[lat, lng]} icon={icon}><Popup><strong>{e.title}</strong><br />{e.category}<br />{hidden ? 'Approximate location shown' : formatGps(e.lat, e.lng)}</Popup></Marker>;})}</MapContainer></section>}
 
-    {screen === 'Settings' && <section><h2>Settings</h2><p className="warning">Local browser data can be lost if site data/cache is cleared. Export backups regularly.</p><button onClick={() => { if (!window.confirm('Delete all local data? This cannot be undone.')) return; localStorage.removeItem(STORAGE_KEY); setDb(blank); }}>Reset Local Data</button><button onClick={() => exportBackup(db)}>Export Backup</button><label>Import Backup<input type="file" accept="application/json" onChange={(e) => importBackupFile(e.target.files?.[0], db, setDb)} /></label><p>Data stored on this device only.</p></section>}
+    {screen === 'Settings' && <section><h2>Settings</h2><p className="warning">Your journal lives only on this device. Export backups regularly and keep them somewhere safe.</p><button onClick={() => { if (!window.confirm('Delete all local data? This cannot be undone.')) return; clearState().catch(() => {}); localStorage.removeItem(LEGACY_STORAGE_KEY); setDb(blank); }}>Reset Local Data</button><button onClick={doExportBackup}>Export Backup</button><label>Import Backup<input type="file" accept="application/json" onChange={(e) => importBackupFile(e.target.files?.[0], db, setDb)} /></label><p>{db.lastBackupAt ? `Last backup: ${new Date(db.lastBackupAt).toLocaleDateString()}` : 'No backup exported yet.'}</p></section>}
   </div>;
+}
+
+function QuestForm({ addQuest }) {
+  const [name, setName] = useState('');
+  const [itemsText, setItemsText] = useState('');
+  const items = itemsText.split('\n').map((s) => s.trim()).filter(Boolean);
+  const valid = name.trim().length > 0 && items.length >= 2 && items.length <= 10;
+  return <details className="quest-form">
+    <summary>Create a quest (adults)</summary>
+    <p>Name a hunt for a specific place or trip, then list 2–10 things to find, one per line.</p>
+    <label>Quest name<input value={name} onChange={(e) => setName(e.target.value)} placeholder="Irish Canyon trip" /></label>
+    <label>Things to find<textarea value={itemsText} onChange={(e) => setItemsText(e.target.value)} placeholder={'A petroglyph viewpoint\nA juniper older than grandpa\nAn animal track\nA quiet place\nSomething that surprised you'} rows={6} /></label>
+    <button disabled={!valid} onClick={() => { addQuest(name.trim(), items); setName(''); setItemsText(''); }}>Save Quest</button>
+  </details>;
 }
 
 function ProfileForm({ addProfile }) {

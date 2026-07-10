@@ -166,7 +166,7 @@ describe('load() validation', () => {
     expect(select.value).toBe('real-id');
   });
 
-  it('nulls out an adventure whose categories include a deleted category', async () => {
+  it('keeps an adventure with non-category items (free-text quest items are valid)', async () => {
     localStorage.setItem('coquest.v1', JSON.stringify({
       safetyAck: true,
       profiles: [{ id: 'p1', name: 'Tester', role: 'adult' }],
@@ -174,13 +174,16 @@ describe('load() validation', () => {
       entries: [],
       activeAdventure: {
         id: 'adv1',
-        categories: ['Deleted category', 'Rock / mineral'],
+        categories: ['Renamed old category', 'Rock / mineral'],
         found: [],
         createdAt: Date.now(),
       },
     }));
     render(<App />);
-    expect(await screen.findByText(/ready for an adventure/i)).toBeInTheDocument();
+    // Since quests allow free-text items, unknown names stay checkable instead
+    // of the whole adventure being discarded.
+    expect(await screen.findByText(/renamed old category/i)).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /found it/i })).toHaveLength(2);
   });
 
   it('nulls out an adventure with a corrupt shape (missing found array)', async () => {
@@ -214,17 +217,117 @@ describe('load() validation', () => {
 // ─── Safety acknowledgement gate ──────────────────────────────────────────────
 
 describe('safety gate', () => {
-  it('shows safety screen before ack', () => {
+  it('shows safety screen before ack', async () => {
     render(<App />);
-    expect(screen.getByText(/Colorado Quest Safety/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Colorado Quest Safety/i)).toBeInTheDocument();
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
   });
 
   it('shows main app after acknowledging', async () => {
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole('button', { name: /i acknowledge/i }));
+    await user.click(await screen.findByRole('button', { name: /i acknowledge/i }));
     expect(await screen.findByRole('navigation')).toBeInTheDocument();
+  });
+});
+
+// ─── IndexedDB persistence & migration ────────────────────────────────────────
+
+describe('storage', () => {
+  it('migrates legacy localStorage data into IndexedDB on first load', async () => {
+    localStorage.setItem('coquest.v1', JSON.stringify({
+      safetyAck: true,
+      profiles: [{ id: 'p1', name: 'Migrated', role: 'adult' }],
+      activeProfileId: 'p1',
+      entries: [makeEntry({ title: 'Old localStorage entry' })],
+      activeAdventure: null,
+    }));
+    render(<App />);
+    // Legacy data is visible in the app…
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /^Journal$/i }));
+    expect(screen.getByRole('button', { name: /old localstorage entry/i })).toBeInTheDocument();
+    // …and has been copied into IndexedDB.
+    const { loadState } = await import('./storage.js');
+    await waitFor(async () => {
+      const stored = await loadState();
+      expect(stored?.entries?.length).toBe(1);
+    });
+  });
+
+  it('persists changes to IndexedDB (debounced)', async () => {
+    render(<App />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /i acknowledge/i }));
+    const { loadState } = await import('./storage.js');
+    await waitFor(async () => {
+      const stored = await loadState();
+      expect(stored?.safetyAck).toBe(true);
+    }, { timeout: 2000 });
+  });
+
+  it('converts a legacy adventure shape (categories) to items', async () => {
+    localStorage.setItem('coquest.v1', JSON.stringify({
+      safetyAck: true,
+      profiles: [{ id: 'p1', name: 'Tester', role: 'adult' }],
+      activeProfileId: 'p1',
+      entries: [],
+      activeAdventure: { id: 'adv1', categories: ['Rock / mineral', 'Landform'], found: ['Rock / mineral'], createdAt: 1 },
+    }));
+    render(<App />);
+    // The old adventure still renders, with its progress intact.
+    expect(await screen.findByText(/landform/i)).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /found it/i })).toHaveLength(1);
+  });
+});
+
+// ─── Saved quests ─────────────────────────────────────────────────────────────
+
+describe('saved quests', () => {
+  beforeEach(() => {
+    localStorage.setItem('coquest.v1', JSON.stringify({
+      safetyAck: true,
+      profiles: [{ id: 'p1', name: 'Parent', role: 'adult' }, { id: 'p2', name: 'Kiddo', role: 'kid' }],
+      activeProfileId: 'p1',
+      entries: [],
+      activeAdventure: null,
+      savedQuests: [{ id: 'q1', name: 'Irish Canyon trip', items: ['A petroglyph viewpoint', 'An animal track', 'A quiet place'], createdAt: 1 }],
+    }));
+  });
+
+  it('lists saved quests and starts one with its own items', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    expect(await screen.findByText(/irish canyon trip/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^Start$/i }));
+    expect(screen.getByRole('heading', { name: /irish canyon trip/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /found it/i })).toHaveLength(3);
+  });
+
+  it('adults can create a quest', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText(/ready for an adventure/i);
+    await user.click(screen.getByText(/create a quest/i));
+    await user.type(screen.getByLabelText(/quest name/i), 'Sand Wash walk');
+    await user.type(screen.getByLabelText(/things to find/i), 'A wild horse track{enter}A sagebrush smell');
+    await user.click(screen.getByRole('button', { name: /save quest/i }));
+    expect(screen.getByText(/sand wash walk/i)).toBeInTheDocument();
+  });
+
+  it('kids do not see quest creation or delete', async () => {
+    localStorage.setItem('coquest.v1', JSON.stringify({
+      safetyAck: true,
+      profiles: [{ id: 'p2', name: 'Kiddo', role: 'kid' }],
+      activeProfileId: 'p2',
+      entries: [],
+      activeAdventure: null,
+      savedQuests: [{ id: 'q1', name: 'Irish Canyon trip', items: ['A', 'B'], createdAt: 1 }],
+    }));
+    render(<App />);
+    expect(await screen.findByText(/irish canyon trip/i)).toBeInTheDocument();
+    expect(screen.queryByText(/create a quest/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
   });
 });
 
