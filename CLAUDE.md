@@ -40,6 +40,7 @@ db = {
   entries: [Entry],
   safetyAck: boolean,               // first-run safety acknowledgement gate
   activeAdventure: null | { id, name, items: [string], found: [string], createdAt, questId? },
+  activeHike: null | { id, partyMembers: [string], createdAt },  // current hike session
   savedQuests: [{ id, name, items: [string], createdAt }],
   lastBackupAt: number | null,
 }
@@ -54,6 +55,10 @@ Photos are re-encoded through a canvas before storage (`processPhoto`): strips E
 ### Navigation
 
 Screen state is a plain string (`screen`). All screens render inline in `App` with `{screen === 'Foo' && <section>…</section>}` conditionals. No React Router. Screens: `Home`, `New Discovery`, `Journal`, `Entry Detail`, `Edit Entry`, `Badges`, `Map`, `Yearbook`, `Profiles`, `Settings`. The selected journal entry is stored as an id (`selectedId`) and derived from `db.entries` — do not duplicate entry objects into separate state.
+
+### Hike tracking
+
+An `activeHike` session records who is on the trip. Start via the **Start Tracking** button on Home (after safety acknowledgement), which opens a modal to select party members. Once started, the hike shows on Home with an option to **Log Discovery** (jumps to New Discovery) or **End Hike**. Party members auto-populate the "People credited" checkboxes on entry forms during an active hike. This matches the user's workflow: arrive at location, open app, start tracking with present party, then log discoveries. Ended hike clears the session.
 
 ### Gamification system
 
