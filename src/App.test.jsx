@@ -637,3 +637,91 @@ describe('Reset Local Data', () => {
     expect(await screen.findByText(/Colorado Quest Safety/i)).toBeInTheDocument();
   });
 });
+
+// ─── Hike tracking ────────────────────────────────────────────────────────────
+
+describe('hike tracking', () => {
+  beforeEach(() => {
+    localStorage.setItem('coquest.v1', JSON.stringify({
+      safetyAck: true,
+      profiles: [
+        { id: 'p1', name: 'Adult', role: 'adult' },
+        { id: 'p2', name: 'Kid', role: 'kid' }
+      ],
+      activeProfileId: 'p1',
+      entries: [],
+      activeAdventure: null,
+      activeHike: null,
+    }));
+  });
+
+  it('shows Start Tracking button on Home screen', async () => {
+    render(<App />);
+    expect(await screen.findByRole('button', { name: /start tracking/i })).toBeInTheDocument();
+  });
+
+  it('opens hike setup modal when Start Tracking is clicked', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /start tracking/i }));
+    expect(screen.getByText(/who is on this hike/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Adult/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Kid/)).toBeInTheDocument();
+  });
+
+  it('requires at least one party member', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /start tracking/i }));
+    const startBtn = screen.getByRole('button', { name: /^Start Tracking$/ });
+    expect(startBtn).toBeDisabled();
+    await user.click(screen.getByLabelText(/Adult/));
+    expect(startBtn).not.toBeDisabled();
+  });
+
+  it('starts hike and goes to New Discovery', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /start tracking/i }));
+    await user.click(screen.getByLabelText(/Adult/));
+    await user.click(screen.getByRole('button', { name: /^Start Tracking$/ }));
+    expect(await screen.findByRole('heading', { name: /new discovery/i })).toBeInTheDocument();
+  });
+
+  it('pre-populates party members on New Discovery form', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /start tracking/i }));
+    await user.click(screen.getByLabelText(/^Adult \(adult\)$/));
+    await user.click(screen.getByLabelText(/^Kid \(kid\)$/));
+    await user.click(screen.getByRole('button', { name: /^Start Tracking$/ }));
+    await screen.findByRole('heading', { name: /new discovery/i });
+    const adultCheckbox = screen.getByLabelText(/^Adult \(adult\)$/);
+    const kidCheckbox = screen.getByLabelText(/^Kid \(kid\)$/);
+    expect(adultCheckbox).toBeChecked();
+    expect(kidCheckbox).toBeChecked();
+  });
+
+  it('shows active hike info on Home screen', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /start tracking/i }));
+    await user.click(screen.getByLabelText(/^Adult \(adult\)$/));
+    await user.click(screen.getByRole('button', { name: /^Start Tracking$/ }));
+    await user.click(await screen.findByRole('button', { name: /^Home$/i }));
+    expect(screen.getByText(/tracking active/i)).toBeInTheDocument();
+    expect(screen.getByText(/party members: adult/i)).toBeInTheDocument();
+  });
+
+  it('can end hike from Home screen', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /start tracking/i }));
+    await user.click(screen.getByLabelText(/Adult/));
+    await user.click(screen.getByRole('button', { name: /^Start Tracking$/ }));
+    await user.click(await screen.findByRole('button', { name: /^Home$/i }));
+    await user.click(screen.getByRole('button', { name: /end hike/i }));
+    expect(screen.getByRole('button', { name: /start tracking/i })).toBeInTheDocument();
+    expect(screen.queryByText(/tracking active/i)).not.toBeInTheDocument();
+  });
+});
