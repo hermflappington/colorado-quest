@@ -1,259 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import {
+  CATEGORIES, SENSITIVE, CONFIDENCE, STATUS, LAND_ACCESS,
+  autoTitle, formatGps, entryPoints, gameStats, normalizeEntry, pickAdventureCategories,
+} from './game.js';
+import {
+  LEGACY_STORAGE_KEY, clearState, loadState, readLegacyLocalStorage, requestPersistence, saveState,
+} from './storage.js';
+import { FIELD_GUIDE } from './fieldGuide.js';
 
-const STORAGE_KEY = 'coquest.v1';
-const SENSITIVE = new Set([
-  'Possible artifact',
-  'Rock art / petroglyph',
-  'Sacred or significant place',
-  'Fossil-looking object',
-]);
-const CATEGORIES = [
-  'Rock / mineral',
-  'Landform',
-  'Historic place',
-  'No visible historic trace',
-  'Possible artifact',
-  'Rock art / petroglyph',
-  'Sacred or significant place',
-  'Fossil-looking object',
-  'Wildlife / track / ecology',
-  'Other discovery',
-];
-const CONFIDENCE = ['Low', 'Medium', 'High', 'Needs expert review'];
-const STATUS = ['New', 'Reviewed', 'Needs follow-up', 'Archived'];
-const LAND_ACCESS = ['public land', 'private land', 'unknown', 'permitted area', 'trail/roadside'];
-const LEVELS = [
-  { name: 'Trail Starter', points: 0 },
-  { name: 'Moffat County Scout', points: 100 },
-  { name: 'Browns Park Tracker', points: 250 },
-  { name: 'Yampa River Explorer', points: 500 },
-  { name: 'Dinosaur Country Naturalist', points: 750 },
-  { name: 'Northwest Colorado Pathfinder', points: 1000 },
-  { name: 'Mountain Memory Keeper', points: 1500 },
-];
-const PLACE_TALKS = [
-  'Who else may have stood near here long before us?',
-  'What has this mountain seen that we will never know?',
-  'What still looks the same as it might have 1,000 years ago?',
-  'What changed here in the last 100 years?',
-  'How can we be good guests in this place today?',
-  'What would this place teach us if we were quiet for one minute?',
-  'What signs of water, wind, fire, or time do you see?',
-  'What do you want to remember about standing here?',
-  'What might a kid standing here 1,000 years from now notice?',
-  'What are we borrowing from this place, and how do we give respect back?',
-  'What do you not see here, and what might that still teach us?',
-  'How can quiet places be just as important as famous places?',
-];
-const BADGES = [
-  {
-    group: 'Northwest Colorado',
-    name: 'Moffat County Scout',
-    description: 'Log your first Colorado Quest discovery.',
-    earned: (stats) => stats.entryCount >= 1,
-  },
-  {
-    group: 'Northwest Colorado',
-    name: 'Browns Park Tracker',
-    description: 'Log a discovery with Browns Park in the location name.',
-    earned: (stats) => stats.locationText.includes('browns park'),
-  },
-  {
-    group: 'Northwest Colorado',
-    name: 'Dinosaur Country Naturalist',
-    description: 'Log a discovery with Dinosaur in the location name.',
-    earned: (stats) => stats.locationText.includes('dinosaur'),
-  },
-  {
-    group: 'Northwest Colorado',
-    name: 'Yampa River Explorer',
-    description: 'Log a discovery with Yampa in the location name.',
-    earned: (stats) => stats.locationText.includes('yampa'),
-  },
-  {
-    group: 'Northwest Colorado',
-    name: 'Irish Canyon Listener',
-    description: 'Log a discovery with Irish Canyon in the location name.',
-    earned: (stats) => stats.locationText.includes('irish canyon'),
-  },
-  {
-    group: 'Northwest Colorado',
-    name: 'Irish Canyon Respectful Guest',
-    description: 'At Irish Canyon, log a no visible historic trace observation.',
-    earned: (stats) => stats.irishCanyonQuietCount >= 1,
-  },
-  {
-    group: 'Northwest Colorado',
-    name: 'Green River Wanderer',
-    description: 'Log a discovery with Green River in the location name.',
-    earned: (stats) => stats.locationText.includes('green river'),
-  },
-  {
-    group: 'Northwest Colorado',
-    name: 'Sand Wash Basin Spotter',
-    description: 'Log a discovery with Sand Wash Basin in the location name.',
-    earned: (stats) => stats.locationText.includes('sand wash'),
-  },
-  {
-    group: 'Northwest Colorado',
-    name: 'Maybell Field Scout',
-    description: 'Log a discovery with Maybell in the location name.',
-    earned: (stats) => stats.locationText.includes('maybell'),
-  },
-  {
-    group: 'Northwest Colorado',
-    name: 'Craig Country Observer',
-    description: 'Log a discovery with Craig in the location name.',
-    earned: (stats) => stats.locationText.includes('craig'),
-  },
-  {
-    group: 'Northwest Colorado',
-    name: 'Little Snake Lookout',
-    description: 'Log a discovery with Little Snake in the location name.',
-    earned: (stats) => stats.locationText.includes('little snake'),
-  },
-  {
-    group: 'Northwest Colorado',
-    name: 'Echo Park Pathfinder',
-    description: 'Log a discovery with Echo Park in the location name.',
-    earned: (stats) => stats.locationText.includes('echo park'),
-  },
-  {
-    group: 'Northwest Colorado',
-    name: 'Deerlodge Discoverer',
-    description: 'Log a discovery with Deerlodge in the location name.',
-    earned: (stats) => stats.locationText.includes('deerlodge'),
-  },
-  {
-    group: 'Northwest Colorado',
-    name: 'Vermillion Basin Adventurer',
-    description: 'Log a discovery with Vermillion in the location name.',
-    earned: (stats) => stats.locationText.includes('vermillion'),
-  },
-  {
-    group: 'Northwest Colorado',
-    name: 'Juniper Canyon Naturalist',
-    description: 'Log a discovery with Juniper Canyon in the location name.',
-    earned: (stats) => stats.locationText.includes('juniper canyon'),
-  },
-  {
-    group: 'Northwest Colorado',
-    name: 'Cedar Mountain Climber',
-    description: 'Log a discovery with Cedar Mountain in the location name.',
-    earned: (stats) => stats.locationText.includes('cedar mountain'),
-  },
-  {
-    group: 'Colorado',
-    name: 'Northwest Colorado Pathfinder',
-    description: 'Log five discoveries and three gratitude notes.',
-    earned: (stats) => stats.entryCount >= 5 && stats.gratitudeCount >= 3,
-  },
-  {
-    group: 'Colorado',
-    name: 'Rocky Mountain Observer',
-    description: 'Log ten total discoveries.',
-    earned: (stats) => stats.entryCount >= 10,
-  },
-  {
-    group: 'Colorado',
-    name: 'Red Rock Reader',
-    description: 'Log three rock, mineral, landform, or fossil discoveries.',
-    earned: (stats) => stats.earthCount >= 3,
-  },
-  {
-    group: 'Colorado',
-    name: 'Trail Steward',
-    description: 'Log a discovery on a trail or roadside.',
-    earned: (stats) => stats.trailCount >= 1,
-  },
-  {
-    group: 'Colorado',
-    name: 'Public Lands Guest',
-    description: 'Log a discovery on public land.',
-    earned: (stats) => stats.publicLandCount >= 1,
-  },
-  {
-    group: 'Colorado',
-    name: 'History Seeker',
-    description: 'Log a historic place discovery.',
-    earned: (stats) => stats.categoryCounts['Historic place'] >= 1,
-  },
-  {
-    group: 'Colorado',
-    name: 'Quiet Place Observer',
-    description: 'Log a place where no visible historic trace is found.',
-    earned: (stats) => stats.categoryCounts['No visible historic trace'] >= 1,
-  },
-  {
-    group: 'Earth',
-    name: 'Rock Cycle Rookie',
-    description: 'Log your first rock or mineral discovery.',
-    earned: (stats) => stats.categoryCounts['Rock / mineral'] >= 1,
-  },
-  {
-    group: 'Earth',
-    name: 'Landform Listener',
-    description: 'Log your first landform discovery.',
-    earned: (stats) => stats.categoryCounts.Landform >= 1,
-  },
-  {
-    group: 'Earth',
-    name: 'Wildlife Witness',
-    description: 'Log your first wildlife, track, or ecology discovery.',
-    earned: (stats) => stats.categoryCounts['Wildlife / track / ecology'] >= 1,
-  },
-  {
-    group: 'Earth',
-    name: 'Fossil Friend',
-    description: 'Log a fossil-looking object and leave it undisturbed.',
-    earned: (stats) => stats.categoryCounts['Fossil-looking object'] >= 1,
-  },
-  {
-    group: 'Earth',
-    name: 'Leave No Trace Hero',
-    description: 'Log any sensitive discovery with care.',
-    earned: (stats) => stats.sensitiveCount >= 1,
-  },
-  {
-    group: 'Earth',
-    name: 'Gratitude Keeper',
-    description: 'Add five gratitude notes.',
-    earned: (stats) => stats.gratitudeCount >= 5,
-  },
-  {
-    group: 'Earth',
-    name: 'Photo Naturalist',
-    description: 'Add ten discovery photos.',
-    earned: (stats) => stats.photoCount >= 10,
-  },
-  {
-    group: 'Earth',
-    name: 'Water Watcher',
-    description: 'Mention river, creek, spring, lake, or water in a note or location.',
-    earned: (stats) => /\b(river|creek|spring|lake|water)\b/.test(stats.allText),
-  },
-  {
-    group: 'Earth',
-    name: 'Sky Noticer',
-    description: 'Mention sky, cloud, sunrise, sunset, moon, or stars in a note.',
-    earned: (stats) => /\b(sky|cloud|sunrise|sunset|moon|stars)\b/.test(stats.allText),
-  },
-  {
-    group: 'Earth',
-    name: 'Kind Explorer',
-    description: 'Add ten gratitude notes or reach 200 quest points.',
-    earned: (stats) => stats.gratitudeCount >= 10 || stats.totalPoints >= 200,
-  },
-  {
-    group: 'Earth',
-    name: 'Careful Noticer',
-    description: 'Log three no visible historic trace observations.',
-    earned: (stats) => stats.categoryCounts['No visible historic trace'] >= 3,
-  },
-];
+const BACKUP_NUDGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 const icon = new L.Icon({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
@@ -263,99 +21,83 @@ const icon = new L.Icon({
 });
 
 const starterAdult = { id: crypto.randomUUID(), name: 'Adult', role: 'adult' };
-const blank = { profiles: [starterAdult], activeProfileId: starterAdult.id, entries: [], safetyAck: false };
+const blank = { profiles: [starterAdult], activeProfileId: starterAdult.id, entries: [], safetyAck: false, activeAdventure: null, savedQuests: [], lastBackupAt: null };
+
+// Re-encodes photo through canvas: strips EXIF (including GPS), resizes to max 1200px, compresses.
+// Resolves null if the browser cannot decode the file (e.g. HEIC on non-Safari, corrupt file).
+async function processPhoto(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const MAX = 1200;
+      let { naturalWidth: w, naturalHeight: h } = img;
+      if (w > MAX || h > MAX) {
+        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+        else { w = Math.round(w * MAX / h); h = MAX; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', 0.8));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(null);
+    };
+    img.src = url;
+  });
+}
+
+async function processPhotos(files) {
+  const results = await Promise.all(Array.from(files).map(processPhoto));
+  const ok = results.filter(Boolean);
+  if (ok.length < results.length) {
+    alert(`${results.length - ok.length} photo(s) could not be read. If they are iPhone HEIC photos, try converting them to JPEG first.`);
+  }
+  return ok;
+}
 
 const initialForm = {
-  title: '', notes: '', category: CATEGORIES[0], profileIds: [], photos: [], lat: '', lng: '',
+  title: '', notes: '', category: CATEGORIES[0], profileIds: [], photos: [], audioNotes: [], lat: '', lng: '',
   confidence: CONFIDENCE[0], status: STATUS[0], generalLocationName: '', landAccess: LAND_ACCESS[2], gratitude: '',
 };
 
-function load() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    return { ...blank, ...saved };
-  } catch {
-    return blank;
+function sanitizeDb(merged, fallbackProfileId) {
+  if (!merged.profiles.find((p) => p.id === merged.activeProfileId)) {
+    merged.activeProfileId = merged.profiles[0]?.id ?? fallbackProfileId;
   }
+  merged.entries = Array.isArray(merged.entries) ? merged.entries.map(normalizeEntry) : [];
+  merged.savedQuests = Array.isArray(merged.savedQuests) ? merged.savedQuests.filter((q) => q && typeof q.name === 'string' && Array.isArray(q.items) && q.items.length > 0) : [];
+  const adv = merged.activeAdventure;
+  if (adv && Array.isArray(adv.categories) && !adv.items) {
+    // Pre-quest adventures stored the item list under `categories`.
+    adv.items = adv.categories;
+  }
+  if (adv && (!Array.isArray(adv.items) || adv.items.length === 0 || !Array.isArray(adv.found))) {
+    merged.activeAdventure = null;
+  } else if (adv) {
+    adv.found = adv.found.filter((f) => adv.items.includes(f));
+  }
+  return merged;
 }
 
-function autoTitle(category, notes, generalLocationName) {
-  const loc = generalLocationName.trim();
-  if (loc) return `${category} near ${loc}`;
-  const n = notes.trim();
-  if (!n) return `${category} discovery`;
-  return `${category}: ${n.split(/[.!?]/)[0].slice(0, 36)}`;
+// Loads from IndexedDB, falling back to (and migrating from) the legacy
+// localStorage copy. The legacy copy is left in place as a safety net.
+async function loadInitial() {
+  let saved = null;
+  try {
+    saved = await loadState();
+  } catch { /* fall through to legacy */ }
+  const migrating = !saved;
+  if (!saved) saved = readLegacyLocalStorage();
+  const merged = sanitizeDb({ ...blank, ...(saved || {}) }, blank.activeProfileId);
+  if (migrating && saved) {
+    try { await saveState(merged); } catch { /* the save effect will retry */ }
+  }
+  return merged;
 }
-
-function formatGps(lat, lng) {
-  return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-}
-
-function entryPoints(entry) {
-  let points = 10;
-  points += (entry.photos?.length || 0) * 5;
-  if (entry.gratitude?.trim()) points += 5;
-  if (SENSITIVE.has(entry.category)) points += 10;
-  if (entry.category === 'No visible historic trace') points += 10;
-  return points;
-}
-
-function badgePoints(badge) {
-  if (badge.name === 'Northwest Colorado Pathfinder' || badge.name === 'Kind Explorer') return 100;
-  if (badge.group === 'Northwest Colorado') return 50;
-  if (badge.group === 'Colorado') return 40;
-  return 25;
-}
-
-function currentLevel(totalPoints) {
-  const level = [...LEVELS].reverse().find((item) => totalPoints >= item.points) || LEVELS[0];
-  const next = LEVELS.find((item) => item.points > totalPoints);
-  return { ...level, next };
-}
-
-function gameStats(entries) {
-  const locationText = entries.map((entry) => entry.generalLocationName || '').join(' ').toLowerCase();
-  const allText = entries.map((entry) => [entry.title, entry.notes, entry.gratitude, entry.generalLocationName].filter(Boolean).join(' ')).join(' ').toLowerCase();
-  const basePoints = entries.reduce((sum, entry) => sum + entryPoints(entry), 0);
-  const photoCount = entries.reduce((sum, entry) => sum + (entry.photos?.length || 0), 0);
-  const gratitudeCount = entries.filter((entry) => entry.gratitude?.trim()).length;
-  const sensitiveCount = entries.filter((entry) => SENSITIVE.has(entry.category)).length;
-  const trailCount = entries.filter((entry) => entry.landAccess === 'trail/roadside').length;
-  const publicLandCount = entries.filter((entry) => entry.landAccess === 'public land').length;
-  const irishCanyonQuietCount = entries.filter((entry) => (entry.generalLocationName || '').toLowerCase().includes('irish canyon') && entry.category === 'No visible historic trace').length;
-  const categoryCounts = CATEGORIES.reduce((counts, category) => ({ ...counts, [category]: 0 }), {});
-  entries.forEach((entry) => {
-    categoryCounts[entry.category] = (categoryCounts[entry.category] || 0) + 1;
-  });
-  const earthCount = (categoryCounts['Rock / mineral'] || 0) + (categoryCounts.Landform || 0) + (categoryCounts['Fossil-looking object'] || 0);
-  const stats = {
-    entryCount: entries.length,
-    gratitudeCount,
-    locationText,
-    allText,
-    totalPoints: basePoints,
-    basePoints,
-    photoCount,
-    sensitiveCount,
-    trailCount,
-    publicLandCount,
-    irishCanyonQuietCount,
-    categoryCounts,
-    earthCount,
-  };
-  const badges = BADGES.map((badge) => ({ ...badge, points: badgePoints(badge), isEarned: badge.earned(stats) }));
-  const badgeBonusPoints = badges.filter((badge) => badge.isEarned).reduce((sum, badge) => sum + badge.points, 0);
-  const totalPoints = basePoints + badgeBonusPoints;
-  return {
-    ...stats,
-    totalPoints,
-    badgeBonusPoints,
-    level: currentLevel(totalPoints),
-    placeTalk: PLACE_TALKS[(entries.length + badges.filter((badge) => badge.isEarned).length) % PLACE_TALKS.length],
-    badges,
-  };
-}
-
 
 function exportBackup(data) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -378,8 +120,7 @@ function importBackupFile(file, currentDb, setDb) {
         return;
       }
       if (!window.confirm('Restore backup and replace current local data?')) return;
-      const next = { ...currentDb, ...incoming };
-      setDb(next);
+      setDb(sanitizeDb({ ...currentDb, ...incoming }, currentDb.activeProfileId));
     } catch {
       alert('Unable to import backup file.');
     }
@@ -388,18 +129,75 @@ function importBackupFile(file, currentDb, setDb) {
 }
 
 export default function App() {
-  const [db, setDb] = useState(load);
+  const [db, setDb] = useState(null);
   const [screen, setScreen] = useState('Home');
-  const [selected, setSelected] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
   const [revealed, setRevealed] = useState({});
   const [form, setForm] = useState(initialForm);
   const [editForm, setEditForm] = useState(null);
+  const [storageError, setStorageError] = useState(false);
 
-  useEffect(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(db)), [db]);
+  const saveTimer = useRef(null);
+  const dbRef = useRef(db);
+  const holdTimer = useRef(null);
 
-  const sortedEntries = useMemo(() => [...db.entries].sort((a, b) => b.createdAt - a.createdAt), [db.entries]);
-  const stats = useMemo(() => gameStats(db.entries), [db.entries]);
-  const activeProfile = db.profiles.find((p) => p.id === db.activeProfileId);
+  useEffect(() => { dbRef.current = db; }, [db]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadInitial().then((loaded) => { if (!cancelled) setDb(loaded); });
+    requestPersistence();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!db) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      saveState(db)
+        .then(() => setStorageError(false))
+        .catch(() => setStorageError(true));
+    }, 300);
+    return () => clearTimeout(saveTimer.current);
+  }, [db]);
+
+  useEffect(() => {
+    // beforeunload alone is unreliable on mobile Safari; pagehide/visibilitychange
+    // cover the app being backgrounded on a phone, which is the common case here.
+    const flush = () => {
+      if (dbRef.current) saveState(dbRef.current).catch(() => {});
+    };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flush(); };
+    window.addEventListener('beforeunload', flush);
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('beforeunload', flush);
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (screen !== 'Entry Detail') {
+      clearTimeout(holdTimer.current);
+      holdTimer.current = null;
+      setRevealed({});
+    }
+  }, [screen]);
+
+  const entries = db?.entries ?? [];
+  const sortedEntries = useMemo(() => [...entries].sort((a, b) => b.createdAt - a.createdAt), [entries]);
+  const stats = useMemo(() => gameStats(entries), [entries]);
+  const activeProfile = db?.profiles.find((p) => p.id === db.activeProfileId);
+  const selected = useMemo(() => entries.find((e) => e.id === selectedId) ?? null, [entries, selectedId]);
+
+  const [yearbookYear, setYearbookYear] = useState('all');
+  const yearbookYears = useMemo(() => [...new Set(entries.map((e) => new Date(e.createdAt).getFullYear()))].sort(), [entries]);
+  const yearbookEntries = useMemo(() => {
+    const filtered = yearbookYear === 'all' ? entries : entries.filter((e) => new Date(e.createdAt).getFullYear() === Number(yearbookYear));
+    return [...filtered].sort((a, b) => a.createdAt - b.createdAt);
+  }, [entries, yearbookYear]);
 
   const addProfile = (name, role) => setDb((d) => ({ ...d, profiles: [...d.profiles, { id: crypto.randomUUID(), name, role }] }));
 
@@ -408,10 +206,33 @@ export default function App() {
   const createEntry = () => {
     const title = form.title.trim() || autoTitle(form.category, form.notes, form.generalLocationName);
     const entry = { ...form, id: crypto.randomUUID(), title, createdAt: Date.now(), lat: Number(form.lat), lng: Number(form.lng) };
-    setDb((d) => ({ ...d, entries: [entry, ...d.entries] }));
+    setDb((d) => {
+      const adventure = d.activeAdventure;
+      const activeAdventure = adventure && adventure.items.includes(entry.category) && !adventure.found.includes(entry.category)
+        ? { ...adventure, found: [...adventure.found, entry.category] }
+        : adventure;
+      return { ...d, entries: [entry, ...d.entries], activeAdventure };
+    });
     setForm(initialForm);
     setScreen('Journal');
   };
+
+  const startAdventure = () => setDb((d) => ({ ...d, activeAdventure: { id: crypto.randomUUID(), name: 'Find These 5 Things', items: pickAdventureCategories(), found: [], createdAt: Date.now() } }));
+  const startQuest = (quest) => setDb((d) => ({ ...d, activeAdventure: { id: crypto.randomUUID(), name: quest.name, questId: quest.id, items: [...quest.items], found: [], createdAt: Date.now() } }));
+  const endAdventure = () => setDb((d) => ({ ...d, activeAdventure: null }));
+  const markFound = (item) => setDb((d) => {
+    const adventure = d.activeAdventure;
+    if (!adventure || adventure.found.includes(item)) return d;
+    return { ...d, activeAdventure: { ...adventure, found: [...adventure.found, item] } };
+  });
+  const addQuest = (name, items) => setDb((d) => ({ ...d, savedQuests: [...d.savedQuests, { id: crypto.randomUUID(), name, items, createdAt: Date.now() }] }));
+  const deleteQuest = (id) => setDb((d) => ({ ...d, savedQuests: d.savedQuests.filter((q) => q.id !== id) }));
+
+  const doExportBackup = () => {
+    exportBackup(db);
+    setDb((d) => ({ ...d, lastBackupAt: Date.now() }));
+  };
+  const backupDue = db && db.entries.length >= 3 && (!db.lastBackupAt || Date.now() - db.lastBackupAt > BACKUP_NUDGE_MS);
 
   const startEditEntry = (entry) => {
     setEditForm({
@@ -428,48 +249,88 @@ export default function App() {
   const saveEditEntry = () => {
     const title = editForm.title.trim() || autoTitle(editForm.category, editForm.notes, editForm.generalLocationName);
     const updated = { ...editForm, title, lat: Number(editForm.lat), lng: Number(editForm.lng) };
-    setSelected(updated);
     setDb((d) => ({ ...d, entries: d.entries.map((entry) => entry.id === updated.id ? updated : entry) }));
     setScreen('Entry Detail');
   };
 
-  const captureGps = () => navigator.geolocation.getCurrentPosition((p) => {
-    setForm((f) => ({ ...f, lat: p.coords.latitude, lng: p.coords.longitude }));
-  });
+  const captureGps = () => navigator.geolocation.getCurrentPosition(
+    (p) => setForm((f) => ({ ...f, lat: p.coords.latitude, lng: p.coords.longitude })),
+    () => alert('Unable to get GPS. Please check location permissions.'),
+  );
 
-  const captureEditGps = () => navigator.geolocation.getCurrentPosition((p) => {
-    setEditForm((f) => ({ ...f, lat: p.coords.latitude, lng: p.coords.longitude }));
-  });
+  const captureEditGps = () => navigator.geolocation.getCurrentPosition(
+    (p) => setEditForm((f) => ({ ...f, lat: p.coords.latitude, lng: p.coords.longitude })),
+    () => alert('Unable to get GPS. Please check location permissions.'),
+  );
 
   const onPhoto = async (files) => {
-    const next = [];
-    for (const file of files) {
-      const data = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file); });
-      next.push(data);
-    }
+    const next = await processPhotos(files);
     setForm((f) => ({ ...f, photos: [...f.photos, ...next] }));
   };
 
   const onEditPhoto = async (files) => {
-    const next = [];
-    for (const file of files) {
-      const data = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file); });
-      next.push(data);
-    }
+    const next = await processPhotos(files);
     setEditForm((f) => ({ ...f, photos: [...f.photos, ...next] }));
   };
 
+  // Voice notes: MediaRecorder → base64 data URL stored on the entry.
+  const [recording, setRecording] = useState(false);
+  const recorderRef = useRef(null);
+  const canRecord = !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined';
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks = [];
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+        const reader = new FileReader();
+        reader.onload = () => setForm((f) => ({ ...f, audioNotes: [...f.audioNotes, reader.result] }));
+        reader.readAsDataURL(blob);
+      };
+      recorder.start();
+      recorderRef.current = recorder;
+      setRecording(true);
+    } catch {
+      alert('Microphone unavailable. Please check permissions.');
+    }
+  };
+  const stopRecording = () => {
+    recorderRef.current?.stop();
+    recorderRef.current = null;
+    setRecording(false);
+  };
+  useEffect(() => () => { recorderRef.current?.stop(); }, []);
+  useEffect(() => {
+    // Never leave the mic running invisibly if the user navigates away
+    // mid-recording. onstop still fires, so the note is kept, not lost.
+    if (screen !== 'New Discovery' && recorderRef.current) {
+      recorderRef.current.stop();
+      recorderRef.current = null;
+      setRecording(false);
+    }
+  }, [screen]);
+
   const canRevealSensitive = activeProfile?.role === 'adult';
-  const [holdTimer, setHoldTimer] = useState(null);
   const beginRevealHold = (id) => {
-    if (!canRevealSensitive) return;
-    const timer = setTimeout(() => setRevealed((r) => ({ ...r, [id]: true })), 2000);
-    setHoldTimer(timer);
+    // The holdTimer guard also absorbs keyboard auto-repeat: without it, each
+    // repeated keydown would orphan a timer that reveals GPS after release.
+    if (!canRevealSensitive || holdTimer.current) return;
+    holdTimer.current = setTimeout(() => {
+      holdTimer.current = null;
+      setRevealed((r) => ({ ...r, [id]: true }));
+    }, 2000);
   };
   const cancelRevealHold = () => {
-    if (holdTimer) clearTimeout(holdTimer);
-    setHoldTimer(null);
+    clearTimeout(holdTimer.current);
+    holdTimer.current = null;
   };
+
+  if (!db) {
+    return <div className="shell"><p>Loading your journal…</p></div>;
+  }
 
   if (!db.safetyAck) {
     return <div className="shell"><h1>Colorado Quest Safety</h1><p>Observe. Photograph. Document. Leave undisturbed.</p><ul><li>Do not collect.</li><li>Do not dig.</li><li>Do not touch rock art.</li><li>Do not disturb sites.</li><li>Do not trespass.</li><li>Do not publicize sensitive locations.</li></ul><p>Colorado Quest records observations and does not confirm archaeological, geological, fossil, historical, or cultural identification.</p><button onClick={() => setDb((d) => ({ ...d, safetyAck: true }))}>I Acknowledge</button></div>;
@@ -478,15 +339,51 @@ export default function App() {
   return <div className="shell">
     <header>
       <h1>Colorado Quest</h1>
+      {storageError && <p className="warning">Saving failed — recent changes may NOT be stored. Export a backup now, then free up device storage.</p>}
       <label>Active profile
         <select value={db.activeProfileId} onChange={(e) => setDb((d) => ({ ...d, activeProfileId: e.target.value }))}>
           {db.profiles.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.role})</option>)}
         </select>
       </label>
-      <nav>{['Home', 'New Discovery', 'Journal', 'Badges', 'Map', 'Profiles', 'Settings'].map((s) => <button key={s} onClick={() => setScreen(s)}>{s}</button>)}</nav>
+      <nav>{['Home', 'New Discovery', 'Journal', 'Badges', 'Map', 'Yearbook', 'Profiles', 'Settings'].map((s) => <button key={s} aria-current={screen === s ? 'page' : undefined} onClick={() => setScreen(s)}>{s}</button>)}</nav>
     </header>
 
     {screen === 'Home' && <section><h2>Colorado Quest Progress</h2>
+      {backupDue && <p className="warning">It has been a while since your last backup. Your journal lives only on this device. <button onClick={doExportBackup}>Export Backup Now</button></p>}
+      <div className="adventure-card">
+        {db.activeAdventure ? <>
+          <h3>{db.activeAdventure.name || 'Find These 5 Things'}</h3>
+          <ul className="find-list">
+            {db.activeAdventure.items.map((c) => {
+              const found = db.activeAdventure.found.includes(c);
+              return <li key={c} className={found ? 'found' : ''}>
+                <span><span aria-hidden="true">{found ? '✅' : '🔍'}</span> {c}</span>
+                {!found && <button onClick={() => markFound(c)}>Found it!</button>}
+              </li>;
+            })}
+          </ul>
+          {db.activeAdventure.found.length === db.activeAdventure.items.length
+            ? <><p className="celebrate"><span aria-hidden="true">🎉</span> Adventure complete! Great job!</p><button className="cta" onClick={startAdventure}>Start a New Adventure</button></>
+            : <button onClick={endAdventure}>End Adventure</button>}
+        </> : <>
+          <h3>Ready for an adventure?</h3>
+          <p>Roll 5 things to find on your next hike or outing.</p>
+          <button className="cta" onClick={startAdventure}>Start New Adventure</button>
+          {db.savedQuests.length > 0 && <div className="quest-list">
+            <h4>Or start a saved quest</h4>
+            <ul>
+              {db.savedQuests.map((q) => <li key={q.id}>
+                <span>{q.name} ({q.items.length} things)</span>
+                <span className="quest-actions">
+                  <button onClick={() => startQuest(q)}>Start</button>
+                  {activeProfile?.role === 'adult' && <button onClick={() => { if (window.confirm(`Delete quest "${q.name}"?`)) deleteQuest(q.id); }}>Delete</button>}
+                </span>
+              </li>)}
+            </ul>
+          </div>}
+          {activeProfile?.role === 'adult' && <QuestForm addQuest={addQuest} />}
+        </>}
+      </div>
       <div className="level-card">
         <span>Current level</span>
         <strong>{stats.level.name}</strong>
@@ -519,32 +416,47 @@ export default function App() {
       <label>Category<select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></label>
       {form.category === 'No visible historic trace' && <p className="quiet-note">Quiet observation counts. You can earn points for noticing a place respectfully, even when you do not find obvious history.</p>}
       {SENSITIVE.has(form.category) && <p className="warning">Do not disturb, collect, touch, dig, or publicize this location. Exact GPS will stay private.</p>}
-      <label>Title (optional)<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
-      <label>Notes (optional)<textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
-      <label>What are you thankful for here? (optional)<textarea value={form.gratitude} onChange={(e) => setForm({ ...form, gratitude: e.target.value })} /></label>
-      <label>General location name<input value={form.generalLocationName} onChange={(e) => setForm({ ...form, generalLocationName: e.target.value })} /></label>
-      <label>Confidence<select value={form.confidence} onChange={(e) => setForm({ ...form, confidence: e.target.value })}>{CONFIDENCE.map((c) => <option key={c}>{c}</option>)}</select></label>
-      <label>Status<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>{STATUS.map((s) => <option key={s}>{s}</option>)}</select></label>
-      <label>Land access<select value={form.landAccess} onChange={(e) => setForm({ ...form, landAccess: e.target.value })}>{LAND_ACCESS.map((v) => <option key={v}>{v}</option>)}</select></label>
+      <FieldGuideCard category={form.category} />
       <fieldset><legend>People credited (required)</legend>{db.profiles.map((p) => <label key={p.id}><input type="checkbox" checked={form.profileIds.includes(p.id)} onChange={(e) => setForm((f) => ({ ...f, profileIds: e.target.checked ? [...f.profileIds, p.id] : f.profileIds.filter((id) => id !== p.id) }))} />{p.name} ({p.role})</label>)}</fieldset>
-      <label>Photos (required)<input type="file" accept="image/*" multiple onChange={(e) => onPhoto(e.target.files)} /></label>
-      <div className="photos">{form.photos.map((p, i) => <img key={i} src={p} alt="discovery" />)}</div>
+      <label>Take a photo (camera)<input type="file" accept="image/*" capture="environment" onChange={(e) => { onPhoto(e.target.files); e.target.value = ''; }} /></label>
+      <label>Photos (required)<input type="file" accept="image/*" multiple onChange={(e) => { onPhoto(e.target.files); e.target.value = ''; }} /></label>
+      <div className="photos">{form.photos.map((p, i) => <div className="photo-edit" key={`${p.slice(0, 24)}-${i}`}><img src={p} alt={`Discovery photo ${i + 1}`} /><button onClick={() => setForm((f) => ({ ...f, photos: f.photos.filter((_, index) => index !== i) }))}>Remove</button></div>)}</div>
+      {canRecord && <div className="voice-notes">
+        {recording
+          ? <button className="recording" onClick={stopRecording}><span aria-hidden="true">⏹</span> Stop Recording</button>
+          : <button onClick={startRecording}><span aria-hidden="true">🎤</span> Record Voice Note</button>}
+        {form.audioNotes.map((a, i) => <div className="voice-note" key={i}>
+          <audio controls src={a} />
+          <button onClick={() => setForm((f) => ({ ...f, audioNotes: f.audioNotes.filter((_, index) => index !== i) }))}>Remove</button>
+        </div>)}
+      </div>}
       <button onClick={captureGps}>Capture GPS</button>
       <p>{form.lat && form.lng ? formatGps(Number(form.lat), Number(form.lng)) : 'No GPS yet (required)'}</p>
+      <details>
+        <summary>Add more details (optional)</summary>
+        <label>Title<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
+        <label>Notes<textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
+        <label>What are you thankful for here?<textarea value={form.gratitude} onChange={(e) => setForm({ ...form, gratitude: e.target.value })} /></label>
+        <label>General location name<input value={form.generalLocationName} onChange={(e) => setForm({ ...form, generalLocationName: e.target.value })} /></label>
+        <label>Confidence<select value={form.confidence} onChange={(e) => setForm({ ...form, confidence: e.target.value })}>{CONFIDENCE.map((c) => <option key={c}>{c}</option>)}</select></label>
+        <label>Status<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>{STATUS.map((s) => <option key={s}>{s}</option>)}</select></label>
+        <label>Land access<select value={form.landAccess} onChange={(e) => setForm({ ...form, landAccess: e.target.value })}>{LAND_ACCESS.map((v) => <option key={v}>{v}</option>)}</select></label>
+      </details>
       <p className="points-preview">This discovery can earn {entryPoints(form)} quest points.</p>
       <button disabled={!canSave} onClick={createEntry}>Save Discovery</button>
     </section>}
 
-    {screen === 'Journal' && <section><h2>Journal</h2>{sortedEntries.map((e) => <article key={e.id}><button onClick={() => { setSelected(e); setScreen('Entry Detail'); }}>{new Date(e.createdAt).toLocaleString()} - {e.title} ({entryPoints(e)} pts)</button></article>)}</section>}
+    {screen === 'Journal' && <section><h2>Journal</h2>{sortedEntries.map((e) => <article key={e.id}><button onClick={() => { setSelectedId(e.id); setScreen('Entry Detail'); }}>{new Date(e.createdAt).toLocaleString()} - {e.title} ({entryPoints(e)} pts)</button></article>)}</section>}
 
-    {screen === 'Entry Detail' && selected && <section><h2>{selected.title}</h2><p>{selected.category}</p><p>Quest points: {entryPoints(selected)}</p><p>General location: {selected.generalLocationName || 'Not set'}</p><p>Confidence: {selected.confidence}</p><p>Status: {selected.status}</p><p>Land access: {selected.landAccess}</p><p>{selected.notes || 'No notes.'}</p><p>Gratitude: {selected.gratitude || 'Not added yet.'}</p><p>Credits: {selected.profileIds.map((id) => db.profiles.find((p) => p.id === id)?.name).filter(Boolean).join(', ') || 'None'}</p><div className="photos">{selected.photos.map((p, i) => <img key={i} src={p} alt="entry" />)}</div>
-      {SENSITIVE.has(selected.category) && !revealed[selected.id] ? <div><p>Exact GPS hidden (sensitive category).</p>{canRevealSensitive ? <button onMouseDown={() => beginRevealHold(selected.id)} onMouseUp={cancelRevealHold} onMouseLeave={cancelRevealHold} onTouchStart={() => beginRevealHold(selected.id)} onTouchEnd={cancelRevealHold} onTouchCancel={cancelRevealHold}>Hold 2s to reveal (adult only)</button> : <p>Active profile is kid; only approximate location is visible.</p>}</div> : <p>GPS: {formatGps(selected.lat, selected.lng)}</p>}
+    {screen === 'Entry Detail' && selected && <section><h2>{selected.title}</h2><p>{selected.category}</p><FieldGuideCard category={selected.category} /><p>Quest points: {entryPoints(selected)}</p><p>General location: {selected.generalLocationName || 'Not set'}</p><p>Confidence: {selected.confidence}</p><p>Status: {selected.status}</p><p>Land access: {selected.landAccess}</p><p>{selected.notes || 'No notes.'}</p><p>Gratitude: {selected.gratitude || 'Not added yet.'}</p><p>Credits: {selected.profileIds.map((id) => db.profiles.find((p) => p.id === id)?.name).filter(Boolean).join(', ') || 'None'}</p><div className="photos">{selected.photos.map((p, i) => <img key={i} src={p} alt={`Photo ${i + 1} for ${selected.title}`} />)}</div>
+      {(selected.audioNotes || []).length > 0 && <div className="voice-notes">{selected.audioNotes.map((a, i) => <div className="voice-note" key={i}><audio controls src={a} /></div>)}</div>}
+      {SENSITIVE.has(selected.category) && !revealed[selected.id] ? <div><p>Exact GPS hidden (sensitive category).</p>{canRevealSensitive ? <button onMouseDown={() => beginRevealHold(selected.id)} onMouseUp={cancelRevealHold} onMouseLeave={cancelRevealHold} onTouchStart={() => beginRevealHold(selected.id)} onTouchEnd={cancelRevealHold} onTouchCancel={cancelRevealHold} onKeyDown={(e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); beginRevealHold(selected.id); } }} onKeyUp={(e) => { if (e.key === ' ' || e.key === 'Enter') cancelRevealHold(); }} onBlur={cancelRevealHold}>Hold 2s to reveal (adult only)</button> : <p>Active profile is kid; only approximate location is visible.</p>}</div> : <p>GPS: {formatGps(selected.lat, selected.lng)}</p>}
       <div className="actions">
         <button onClick={() => startEditEntry(selected)}>Edit Entry</button>
-        <button onClick={() => { setDb((d) => ({ ...d, entries: d.entries.filter((x) => x.id !== selected.id) })); setScreen('Journal'); setSelected(null); }}>Delete Entry</button>
-        <label>Change status<select value={selected.status} onChange={(e) => { const status = e.target.value; setSelected((v) => ({ ...v, status })); setDb((d) => ({ ...d, entries: d.entries.map((x) => x.id === selected.id ? { ...x, status } : x) })); }} >{STATUS.map((s) => <option key={s}>{s}</option>)}</select></label>
-        <label>Change confidence<select value={selected.confidence} onChange={(e) => { const confidence = e.target.value; setSelected((v) => ({ ...v, confidence })); setDb((d) => ({ ...d, entries: d.entries.map((x) => x.id === selected.id ? { ...x, confidence } : x) })); }} >{CONFIDENCE.map((c) => <option key={c}>{c}</option>)}</select></label>
-        <button onClick={() => { const status = 'Reviewed'; setSelected((v) => ({ ...v, status })); setDb((d) => ({ ...d, entries: d.entries.map((x) => x.id === selected.id ? { ...x, status } : x) })); }}>Mark Reviewed</button>
+        <button onClick={() => { setDb((d) => ({ ...d, entries: d.entries.filter((x) => x.id !== selected.id) })); setScreen('Journal'); setSelectedId(null); }}>Delete Entry</button>
+        <label>Change status<select value={selected.status} onChange={(e) => { const status = e.target.value; setDb((d) => ({ ...d, entries: d.entries.map((x) => x.id === selected.id ? { ...x, status } : x) })); }}>{STATUS.map((s) => <option key={s}>{s}</option>)}</select></label>
+        <label>Change confidence<select value={selected.confidence} onChange={(e) => { const confidence = e.target.value; setDb((d) => ({ ...d, entries: d.entries.map((x) => x.id === selected.id ? { ...x, confidence } : x) })); }}>{CONFIDENCE.map((c) => <option key={c}>{c}</option>)}</select></label>
+        <button onClick={() => { setDb((d) => ({ ...d, entries: d.entries.map((x) => x.id === selected.id ? { ...x, status: 'Reviewed' } : x) })); }}>Mark Reviewed</button>
       </div>
     </section>}
 
@@ -560,8 +472,8 @@ export default function App() {
       <label>Status<select value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}>{STATUS.map((s) => <option key={s}>{s}</option>)}</select></label>
       <label>Land access<select value={editForm.landAccess} onChange={(e) => setEditForm({ ...editForm, landAccess: e.target.value })}>{LAND_ACCESS.map((v) => <option key={v}>{v}</option>)}</select></label>
       <fieldset><legend>People credited</legend>{db.profiles.map((p) => <label key={p.id}><input type="checkbox" checked={editForm.profileIds.includes(p.id)} onChange={(e) => setEditForm((f) => ({ ...f, profileIds: e.target.checked ? [...f.profileIds, p.id] : f.profileIds.filter((id) => id !== p.id) }))} />{p.name} ({p.role})</label>)}</fieldset>
-      <label>Add photos<input type="file" accept="image/*" multiple onChange={(e) => onEditPhoto(e.target.files)} /></label>
-      <div className="photos">{editForm.photos.map((p, i) => <div className="photo-edit" key={`${p.slice(0, 24)}-${i}`}><img src={p} alt="entry" /><button onClick={() => setEditForm((f) => ({ ...f, photos: f.photos.filter((_, index) => index !== i) }))}>Remove</button></div>)}</div>
+      <label>Add photos<input type="file" accept="image/*" multiple onChange={(e) => { onEditPhoto(e.target.files); e.target.value = ''; }} /></label>
+      <div className="photos">{editForm.photos.map((p, i) => <div className="photo-edit" key={`${p.slice(0, 24)}-${i}`}><img src={p} alt={`Photo ${i + 1}`} /><button onClick={() => setEditForm((f) => ({ ...f, photos: f.photos.filter((_, index) => index !== i) }))}>Remove</button></div>)}</div>
       <button onClick={captureEditGps}>Update GPS to Here</button>
       <p>{editForm.lat && editForm.lng ? formatGps(Number(editForm.lat), Number(editForm.lng)) : 'No GPS saved'}</p>
       <div className="actions">
@@ -570,10 +482,64 @@ export default function App() {
       </div>
     </section>}
 
-    {screen === 'Map' && <section><h2>Map</h2><MapContainer center={[39.7392, -104.9903]} zoom={8} style={{ height: '55vh' }}><TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />{db.entries.map((e) => {const hidden = SENSITIVE.has(e.category); const lat = hidden ? Math.round(e.lat * 100) / 100 : e.lat; const lng = hidden ? Math.round(e.lng * 100) / 100 : e.lng; return <Marker key={e.id} position={[lat, lng]} icon={icon}><Popup><strong>{e.title}</strong><br />{e.category}<br />{hidden ? 'Approximate location shown' : formatGps(e.lat, e.lng)}</Popup></Marker>;})}</MapContainer></section>}
+    {screen === 'Map' && <section><h2>Map</h2><MapContainer center={[39.7392, -104.9903]} zoom={8} style={{ height: '55vh' }}><TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />{db.entries.filter((e) => Number.isFinite(e.lat) && Number.isFinite(e.lng)).map((e) => {const hidden = SENSITIVE.has(e.category); const lat = hidden ? Math.round(e.lat * 100) / 100 : e.lat; const lng = hidden ? Math.round(e.lng * 100) / 100 : e.lng; return <Marker key={e.id} position={[lat, lng]} icon={icon}><Popup><strong>{e.title}</strong><br />{e.category}<br />{hidden ? 'Approximate location shown' : formatGps(e.lat, e.lng)}</Popup></Marker>;})}</MapContainer></section>}
 
-    {screen === 'Settings' && <section><h2>Settings</h2><p className="warning">Local browser data can be lost if site data/cache is cleared. Export backups regularly.</p><button onClick={() => { localStorage.removeItem(STORAGE_KEY); setDb(blank); }}>Reset Local Data</button><button onClick={() => exportBackup(db)}>Export Backup</button><label>Import Backup<input type="file" accept="application/json" onChange={(e) => importBackupFile(e.target.files?.[0], db, setDb)} /></label><p>Data stored on this device only.</p></section>}
+    {screen === 'Yearbook' && <section className="yearbook">
+      <h2 className="no-print">Yearbook</h2>
+      <div className="no-print yearbook-controls">
+        <label>Year
+          <select value={yearbookYear} onChange={(e) => setYearbookYear(e.target.value)}>
+            <option value="all">All years</option>
+            {yearbookYears.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </label>
+        <button className="cta" onClick={() => window.print()} disabled={yearbookEntries.length === 0}>Print / Save as PDF</button>
+        <p>In the print dialog, choose “Save as PDF” to make a keepsake book of your discoveries.</p>
+      </div>
+      {yearbookEntries.length === 0 ? <p>No discoveries {yearbookYear === 'all' ? 'yet' : `in ${yearbookYear}`}. Get out there!</p> : <>
+        <div className="yearbook-cover">
+          <h1>Colorado Quest</h1>
+          <p className="yearbook-subtitle">{yearbookYear === 'all' ? 'Our Discoveries' : `Our ${yearbookYear} Discoveries`}</p>
+          <p>{yearbookEntries.length} discoveries · {yearbookEntries.reduce((n, e) => n + e.photos.length, 0)} photos · {yearbookEntries.filter((e) => e.gratitude?.trim()).length} gratitude notes</p>
+        </div>
+        {yearbookEntries.map((e) => <article className="yearbook-entry" key={e.id}>
+          <h3>{e.title}</h3>
+          <p className="yearbook-meta">{new Date(e.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })} · {e.category}{e.generalLocationName ? ` · ${e.generalLocationName}` : ''}</p>
+          {e.notes && <p>{e.notes}</p>}
+          {e.gratitude?.trim() && <p className="yearbook-gratitude">Thankful for: {e.gratitude}</p>}
+          <p className="yearbook-meta">Found by: {e.profileIds.map((id) => db.profiles.find((p) => p.id === id)?.name).filter(Boolean).join(', ') || 'Us'}{SENSITIVE.has(e.category) ? ' · Exact location kept private' : (typeof e.lat === 'number' && e.lat ? ` · ${formatGps(e.lat, e.lng)}` : '')}{(e.audioNotes || []).length > 0 ? ` · ${e.audioNotes.length} voice note${e.audioNotes.length > 1 ? 's' : ''} recorded` : ''}</p>
+          <div className="photos">{e.photos.map((p, i) => <img key={i} src={p} alt={`Photo ${i + 1} for ${e.title}`} />)}</div>
+        </article>)}
+      </>}
+    </section>}
+
+    {screen === 'Settings' && <section><h2>Settings</h2><p className="warning">Your journal lives only on this device. Export backups regularly and keep them somewhere safe.</p><button onClick={() => { if (!window.confirm('Delete all local data? This cannot be undone.')) return; clearState().catch(() => {}); localStorage.removeItem(LEGACY_STORAGE_KEY); setDb(blank); }}>Reset Local Data</button><button onClick={doExportBackup}>Export Backup</button><label>Import Backup<input type="file" accept="application/json" onChange={(e) => importBackupFile(e.target.files?.[0], db, setDb)} /></label><p>{db.lastBackupAt ? `Last backup: ${new Date(db.lastBackupAt).toLocaleDateString()}` : 'No backup exported yet.'}</p></section>}
   </div>;
+}
+
+function FieldGuideCard({ category }) {
+  const guide = FIELD_GUIDE[category];
+  if (!guide) return null;
+  return <details className="field-guide">
+    <summary>Learn about this <span aria-hidden="true">🔎</span></summary>
+    <ul>{guide.facts.map((fact, i) => <li key={i}>{fact}</li>)}</ul>
+    <p className="guide-respect"><strong>How to be respectful:</strong> {guide.respect}</p>
+    <p className="guide-wonder"><strong>Wonder:</strong> {guide.wonder}</p>
+  </details>;
+}
+
+function QuestForm({ addQuest }) {
+  const [name, setName] = useState('');
+  const [itemsText, setItemsText] = useState('');
+  const items = itemsText.split('\n').map((s) => s.trim()).filter(Boolean);
+  const valid = name.trim().length > 0 && items.length >= 2 && items.length <= 10;
+  return <details className="quest-form">
+    <summary>Create a quest (adults)</summary>
+    <p>Name a hunt for a specific place or trip, then list 2–10 things to find, one per line.</p>
+    <label>Quest name<input value={name} onChange={(e) => setName(e.target.value)} placeholder="Irish Canyon trip" /></label>
+    <label>Things to find<textarea value={itemsText} onChange={(e) => setItemsText(e.target.value)} placeholder={'A petroglyph viewpoint\nA juniper older than grandpa\nAn animal track\nA quiet place\nSomething that surprised you'} rows={6} /></label>
+    <button disabled={!valid} onClick={() => { addQuest(name.trim(), items); setName(''); setItemsText(''); }}>Save Quest</button>
+  </details>;
 }
 
 function ProfileForm({ addProfile }) {

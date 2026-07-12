@@ -3,6 +3,7 @@ body { margin: 0; background: #f4f7f2; }
 .shell { max-width: 900px; margin: 0 auto; padding: 1rem; }
 header h1 { margin: 0 0 .5rem; }
 nav { display:flex; flex-wrap:wrap; gap:.4rem; }
+nav button[aria-current="page"] { background:#1a3d2f; color:#fff; border-color:#1a3d2f; }
 button { padding:.5rem .7rem; border-radius:.6rem; border:1px solid #567; background:#fff; }
 section { background: #fff; border-radius: 12px; padding: 1rem; margin-top: .8rem; }
 label, fieldset { display:block; margin:.6rem 0; }
@@ -27,3 +28,51 @@ input, textarea, select { width:100%; padding:.45rem; margin-top:.2rem; }
 .badge.earned { border-color:#f0b84e; background:#fff6dc; }
 .badge:not(.earned) { opacity:.72; }
 .points-preview { font-weight:700; color:#1a3d2f; }
+
+.adventure-card { border:2px solid #1a3d2f; border-radius:.6rem; padding:.8rem; margin:.8rem 0; background:#eef5ea; }
+.adventure-card h3 { margin-top:0; }
+.cta { background:#1a3d2f; color:#fff; font-weight:700; font-size:1.05rem; padding:.7rem 1rem; }
+.find-list { list-style:none; padding:0; margin:.6rem 0; }
+.find-list li { display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding:.5rem; border-radius:.5rem; background:#fff; margin-bottom:.4rem; border:1px solid #cddfca; }
+.find-list li.found { opacity:.65; text-decoration:line-through; }
+.celebrate { font-size:1.1rem; font-weight:700; color:#1a3d2f; }
+.quest-list ul { list-style:none; padding:0; margin:.4rem 0; }
+.quest-list li { display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding:.45rem .5rem; border-radius:.5rem; background:#fff; margin-bottom:.35rem; border:1px solid #cddfca; }
+.quest-list h4 { margin:.8rem 0 .3rem; }
+.quest-actions { display:flex; gap:.35rem; }
+.quest-form { background:#fff; }
+.warning button { margin-left:.5rem; }
+details { margin:.8rem 0; border:1px solid #d4d9d1; border-radius:.5rem; padding:.4rem .6rem; background:#fafbf8; }
+details summary { cursor:pointer; font-weight:700; padding:.3rem 0; }
+button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid #1a3d2f; outline-offset: 2px; }
+
+.field-guide { background:#f0f6ff; border-color:#b9d2f0; }
+.field-guide ul { margin:.4rem 0; padding-left:1.2rem; }
+.field-guide li { margin:.35rem 0; }
+.guide-respect { background:#eef5ea; border-radius:.4rem; padding:.5rem; }
+.guide-wonder { background:#fff9e8; border-radius:.4rem; padding:.5rem; }
+
+.voice-notes { margin:.6rem 0; }
+.voice-note { display:flex; align-items:center; gap:.5rem; margin:.4rem 0; }
+.voice-note audio { flex:1; min-width:0; }
+button.recording { background:#c0392b; color:#fff; border-color:#c0392b; }
+
+.yearbook-controls { display:flex; flex-wrap:wrap; align-items:end; gap:.8rem; }
+.yearbook-controls label { flex:1; min-width:140px; }
+.yearbook-cover { text-align:center; padding:2rem 1rem; border:2px solid #1a3d2f; border-radius:.6rem; margin:.8rem 0; background:#f7faf4; }
+.yearbook-cover h1 { margin:.2rem 0; color:#1a3d2f; }
+.yearbook-subtitle { font-size:1.2rem; font-weight:700; }
+.yearbook-entry { border-bottom:1px solid #d4d9d1; padding:.8rem 0; }
+.yearbook-entry h3 { margin:.2rem 0; color:#1a3d2f; }
+.yearbook-meta { font-size:.9rem; color:#425447; margin:.25rem 0; }
+.yearbook-gratitude { font-style:italic; }
+
+@media print {
+  header, .no-print { display:none !important; }
+  body { background:#fff; }
+  .shell { max-width:none; padding:0; }
+  section { box-shadow:none; border-radius:0; padding:0; margin:0; }
+  .yearbook-cover { border:none; page-break-after:always; padding-top:35vh; }
+  .yearbook-entry { page-break-inside:avoid; break-inside:avoid; }
+  .photos img { height:150px; }
+}
