@@ -303,6 +303,15 @@ export default function App() {
     setRecording(false);
   };
   useEffect(() => () => { recorderRef.current?.stop(); }, []);
+  useEffect(() => {
+    // Never leave the mic running invisibly if the user navigates away
+    // mid-recording. onstop still fires, so the note is kept, not lost.
+    if (screen !== 'New Discovery' && recorderRef.current) {
+      recorderRef.current.stop();
+      recorderRef.current = null;
+      setRecording(false);
+    }
+  }, [screen]);
 
   const canRevealSensitive = activeProfile?.role === 'adult';
   const beginRevealHold = (id) => {
@@ -473,7 +482,7 @@ export default function App() {
       </div>
     </section>}
 
-    {screen === 'Map' && <section><h2>Map</h2><MapContainer center={[39.7392, -104.9903]} zoom={8} style={{ height: '55vh' }}><TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />{db.entries.map((e) => {const hidden = SENSITIVE.has(e.category); const lat = hidden ? Math.round(e.lat * 100) / 100 : e.lat; const lng = hidden ? Math.round(e.lng * 100) / 100 : e.lng; return <Marker key={e.id} position={[lat, lng]} icon={icon}><Popup><strong>{e.title}</strong><br />{e.category}<br />{hidden ? 'Approximate location shown' : formatGps(e.lat, e.lng)}</Popup></Marker>;})}</MapContainer></section>}
+    {screen === 'Map' && <section><h2>Map</h2><MapContainer center={[39.7392, -104.9903]} zoom={8} style={{ height: '55vh' }}><TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />{db.entries.filter((e) => Number.isFinite(e.lat) && Number.isFinite(e.lng)).map((e) => {const hidden = SENSITIVE.has(e.category); const lat = hidden ? Math.round(e.lat * 100) / 100 : e.lat; const lng = hidden ? Math.round(e.lng * 100) / 100 : e.lng; return <Marker key={e.id} position={[lat, lng]} icon={icon}><Popup><strong>{e.title}</strong><br />{e.category}<br />{hidden ? 'Approximate location shown' : formatGps(e.lat, e.lng)}</Popup></Marker>;})}</MapContainer></section>}
 
     {screen === 'Yearbook' && <section className="yearbook">
       <h2 className="no-print">Yearbook</h2>

@@ -198,6 +198,23 @@ describe('load() validation', () => {
     expect(await screen.findByText(/ready for an adventure/i)).toBeInTheDocument();
   });
 
+  it('Map skips entries with missing GPS instead of crashing', async () => {
+    const user = userEvent.setup();
+    localStorage.setItem('coquest.v1', JSON.stringify({
+      safetyAck: true,
+      profiles: [{ id: 'p1', name: 'Tester', role: 'adult' }],
+      activeProfileId: 'p1',
+      entries: [
+        makeEntry({ id: 'e1', title: 'Has GPS' }),
+        { id: 'e2', title: 'No GPS legacy', category: 'Landform', createdAt: 2, confidence: 'Low', status: 'New', landAccess: 'unknown' },
+      ],
+      activeAdventure: null,
+    }));
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /^Map$/i }));
+    expect(screen.getAllByTestId('marker')).toHaveLength(1);
+  });
+
   it('renders Entry Detail for an entry missing photos/profileIds arrays', async () => {
     const user = userEvent.setup();
     localStorage.setItem('coquest.v1', JSON.stringify({
