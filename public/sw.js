@@ -1,4 +1,4 @@
-const CACHE_NAME = 'colorado-quest-v2';
+const CACHE_NAME = 'colorado-quest-v3';
 
 const appShell = () => {
   const scope = self.registration.scope;
