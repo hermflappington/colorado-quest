@@ -21,7 +21,7 @@ const icon = new L.Icon({
 });
 
 const starterAdult = { id: crypto.randomUUID(), name: 'Adult', role: 'adult' };
-const blank = { profiles: [starterAdult], activeProfileId: starterAdult.id, entries: [], safetyAck: false, activeAdventure: null, savedQuests: [], lastBackupAt: null };
+const blank = { profiles: [starterAdult], activeProfileId: starterAdult.id, entries: [], safetyAck: false, activeAdventure: null, activeHike: null, savedQuests: [], lastBackupAt: null };
 
 // Re-encodes photo through canvas: strips EXIF (including GPS), resizes to max 1200px, compresses.
 // Resolves null if the browser cannot decode the file (e.g. HEIC on non-Safari, corrupt file).
@@ -136,6 +136,8 @@ export default function App() {
   const [form, setForm] = useState(initialForm);
   const [editForm, setEditForm] = useState(null);
   const [storageError, setStorageError] = useState(false);
+  const [showHikeSetup, setShowHikeSetup] = useState(false);
+  const [hikePartyMembers, setHikePartyMembers] = useState([]);
 
   const saveTimer = useRef(null);
   const dbRef = useRef(db);
@@ -186,6 +188,13 @@ export default function App() {
     }
   }, [screen]);
 
+  // When entering New Discovery with an active hike, pre-populate party members.
+  useEffect(() => {
+    if (screen === 'New Discovery' && db?.activeHike && form.profileIds.length === 0) {
+      setForm((f) => ({ ...f, profileIds: db.activeHike.partyMembers }));
+    }
+  }, [screen, db?.activeHike]);
+
   const entries = db?.entries ?? [];
   const sortedEntries = useMemo(() => [...entries].sort((a, b) => b.createdAt - a.createdAt), [entries]);
   const stats = useMemo(() => gameStats(entries), [entries]);
@@ -213,8 +222,27 @@ export default function App() {
         : adventure;
       return { ...d, entries: [entry, ...d.entries], activeAdventure };
     });
-    setForm(initialForm);
+    const defaultForm = { ...initialForm };
+    if (db?.activeHike) {
+      defaultForm.profileIds = db.activeHike.partyMembers;
+    }
+    setForm(defaultForm);
     setScreen('Journal');
+  };
+
+  const startHike = () => {
+    setDb((d) => ({
+      ...d,
+      activeHike: { id: crypto.randomUUID(), partyMembers: hikePartyMembers, createdAt: Date.now() }
+    }));
+    setShowHikeSetup(false);
+    setHikePartyMembers([]);
+    setScreen('New Discovery');
+  };
+
+  const endHike = () => {
+    setDb((d) => ({ ...d, activeHike: null }));
+    setScreen('Home');
   };
 
   const startAdventure = () => setDb((d) => ({ ...d, activeAdventure: { id: crypto.randomUUID(), name: 'Find These 5 Things', items: pickAdventureCategories(), found: [], createdAt: Date.now() } }));
@@ -336,6 +364,11 @@ export default function App() {
     return <div className="shell"><h1>Colorado Quest Safety</h1><p>Observe. Photograph. Document. Leave undisturbed.</p><ul><li>Do not collect.</li><li>Do not dig.</li><li>Do not touch rock art.</li><li>Do not disturb sites.</li><li>Do not trespass.</li><li>Do not publicize sensitive locations.</li></ul><p>Colorado Quest records observations and does not confirm archaeological, geological, fossil, historical, or cultural identification.</p><button onClick={() => setDb((d) => ({ ...d, safetyAck: true }))}>I Acknowledge</button></div>;
   }
 
+  // Hike setup modal
+  if (showHikeSetup) {
+    return <div className="shell"><section><h2>Start Tracking</h2><p>Who is on this hike with you? (Select at least yourself)</p><fieldset><legend>Party members</legend>{db.profiles.map((p) => <label key={p.id}><input type="checkbox" checked={hikePartyMembers.includes(p.id)} onChange={(e) => setHikePartyMembers((m) => e.target.checked ? [...m, p.id] : m.filter((id) => id !== p.id))} />{p.name} ({p.role})</label>)}</fieldset><div><button className="cta" disabled={hikePartyMembers.length === 0} onClick={startHike}>Start Tracking</button><button onClick={() => setShowHikeSetup(false)}>Cancel</button></div></section></div>;
+  }
+
   return <div className="shell">
     <header>
       <h1>Colorado Quest</h1>
@@ -350,6 +383,7 @@ export default function App() {
 
     {screen === 'Home' && <section><h2>Colorado Quest Progress</h2>
       {backupDue && <p className="warning">It has been a while since your last backup. Your journal lives only on this device. <button onClick={doExportBackup}>Export Backup Now</button></p>}
+      {db.activeHike ? <div className="adventure-card" style={{ borderColor: '#1a3d2f', backgroundColor: '#eef5ea' }}><h3>Tracking Active</h3><p>Party members: {db.activeHike.partyMembers.map((id) => db.profiles.find((p) => p.id === id)?.name).filter(Boolean).join(', ')}</p><button className="cta" onClick={() => setScreen('New Discovery')}>Log Discovery</button><button onClick={endHike}>End Hike</button></div> : <button className="cta" onClick={() => setShowHikeSetup(true)} style={{ width: '100%', marginBottom: '1rem' }}><span aria-hidden="true">➕</span> Start Tracking</button>}
       <div className="adventure-card">
         {db.activeAdventure ? <>
           <h3>{db.activeAdventure.name || 'Find These 5 Things'}</h3>
